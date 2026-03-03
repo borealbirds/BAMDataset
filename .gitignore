@@ -47,3 +47,9 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# WT auth file
+WTlogin.R
+
+# R project
+*.Rproj
