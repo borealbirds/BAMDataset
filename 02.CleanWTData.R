@@ -17,15 +17,17 @@ library(tidyverse) #basic data wrangling
 library(wildrtrax) #to tidy data from wildtrax
 
 #2. Set root path for data on google drive----
-root <- "G:/Shared drives/BAM_AvianData"
+root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Login to WildTrax----
 source("WTlogin.R")
 wt_auth()
 
-#4. Get the downloaded data object ----
-v <- "2026-03-02"
-load(file.path(root, "WildTrax", paste0("wildtrax_raw_", v, ".Rdata")))
+#4. Set the WT version ----
+v.wt <- "2026-03-02"
+
+#5. Get the downloaded data object ----
+load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
 
 #TIDY ARU DATA###########
 
@@ -76,11 +78,13 @@ pc.tidy <- pc |>
 #PUT TOGETHER#########
 
 #1. Combine ----
-all.tidy <- rbind(aru.tidy, pc.tidy)
+wt.tidy <- rbind(aru.tidy, pc.tidy)
 
 #2. Filter out tasks we don't want ----
 #filter to approximately North America
-all.use <- all.tidy  |> 
+#clean up some bird codes
+#only use species with 4 letter codes
+wt.use <- wt.tidy  |> 
   dplyr::filter(method!="None",
                 status %in% c("t", "TRUE"),
                 (max_noise_volume!="Extreme" | is.na(max_noise_volume)),
@@ -90,17 +94,23 @@ all.use <- all.tidy  |>
                 !is.na(distance),
                 !is.na(latitude),
                 !is.na(date_time),
+                str_length(species)==4,
                 latitude > 10,
                 latitude < 85,
                 longitude < -52,
-                longitude > -168) 
+                longitude > -168) |> 
+  mutate(species = case_when(species=="GRAJ" ~ "CAJA",
+                             species=="PSFL" ~ "WEFL",
+                             species=="MEGU" ~ "COGU",
+                             !is.na(species) ~ species))
+rm(wt.tidy)
 
 #3. Make wide ----
 #we don't use wt_make_wide() because we're using a different format now
 #remove columns we dont need anymore
-all.wide <- all.use |> 
+wt.wide <- wt.use |> 
   pivot_wider(names_from=species, values_from=count, values_fn=sum, values_fill=0) |> 
   dplyr::select(-status, -location_buffer_m, -max_noise_type, -max_noise_volume)
 
 #4. Save ----
-save(all.wide, file=file.path(root, "WildTrax", paste0("02_wildtrax_clean_", v, ".Rdata")))
+save(wt.wide, file=file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))

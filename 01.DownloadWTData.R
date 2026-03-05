@@ -19,7 +19,7 @@ library(tidyverse) #basic data wrangling
 library(wildrtrax) #to download data from wildtrax
 
 #2. Set root path for data on google drive----
-root <- "G:/Shared drives/BAM_AvianData"
+root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Login to WildTrax----
 source("WTlogin.R")
@@ -112,4 +112,4 @@ for(i in 1:nrow(error)){
 }
 
 #5. Save date stamped data & project list----
-save(aru.wt, pc.wt, proj, error.log, file=file.path(root, "WildTrax", paste0("01_wildtrax_raw_", Sys.Date(), ".Rdata")))
+save(aru.wt, pc.wt, proj, error.log, file=file.path(root, "WildTrax", Sys.Date(), paste0("01_wildtrax_raw_", Sys.Date(), ".Rdata")))
