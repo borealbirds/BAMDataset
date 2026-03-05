@@ -58,6 +58,7 @@ ebd.unique <- auk_unique(ebd.raw)
 #Filter out hotspots
 #Replace common name with alpha code
 #Filter to unique checklists only
+#Species with 4 letter alpha codes only
 ebd.tidy <- ebd.unique |> 
   mutate(source = "eBird",
          organization = "eBird",
@@ -76,7 +77,8 @@ ebd.tidy <- ebd.unique |>
                 !is.na(duration),
                 !is.na(distance),
                 !is.na(latitude),
-                !is.na(date_time))
+                !is.na(date_time),
+                str_length(species_code)==4)
 
 #4. Get location ids ----  
 ebd.loc <- ebd.tidy |> 
@@ -95,7 +97,7 @@ ebd.wide <- ebd.tidy |>
 all.wide <- rbindlist(list(wt.wide, ebd.wide), fill=TRUE)
 dat <- all.wide |> 
   select(all_of(colnms), sort(setdiff(names(all.wide), all_of(colnms))))
-  mutate(across(c(), replace_na, 0))
+  mutate(across(c("ABBE":"YTWA"), replace_na, 0))
 
 #7. Save ----
-save(dat, file=file.path(root, paste0("04_BAMDatabase_WTV", v.wt, "_EBdV", v.ebd,  ".Rdata")))
+save(dat, file=file.path(root, paste0("04_BAMDatabase_WT", v.wt, "_EBd", v.ebd,  ".Rdata")))

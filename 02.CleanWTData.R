@@ -95,6 +95,7 @@ wt.use <- wt.tidy  |>
                 !is.na(latitude),
                 !is.na(date_time),
                 str_length(species)==4,
+                species!="4794",
                 latitude > 10,
                 latitude < 85,
                 longitude < -52,
