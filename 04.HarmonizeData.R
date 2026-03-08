@@ -96,8 +96,8 @@ ebd.wide <- ebd.tidy |>
 #sort the species
 all.wide <- rbindlist(list(wt.wide, ebd.wide), fill=TRUE)
 dat <- all.wide |> 
-  select(all_of(colnms), sort(setdiff(names(all.wide), all_of(colnms))))
-  mutate(across(c("ABBE":"YTWA"), replace_na, 0))
+  select(all_of(colnms), sort(setdiff(names(all.wide), all_of(colnms)))) |> 
+  mutate(across(-colnms, replace_na, 0))
 
 #7. Save ----
-save(dat, file=file.path(root, paste0("04_BAMDatabase_WT", v.wt, "_EBd", v.ebd,  ".Rdata")))
+save(dat, file=file.path(root, paste0("04_BAMDataset_WT", v.wt, "_EBd", v.ebd,  ".Rdata")))
