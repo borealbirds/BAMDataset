@@ -100,4 +100,4 @@ dat <- all.wide |>
   mutate(across(-colnms, replace_na, 0))
 
 #7. Save ----
-save(dat, file=file.path(root, paste0("04_BAMDataset_WT", v.wt, "_EBd", v.ebd,  ".Rdata")))
+save(dat, file=file.path(root, paste0("04_BAMDataset_WT-", v.wt, "_EBd-", v.ebd,  ".Rdata")))
