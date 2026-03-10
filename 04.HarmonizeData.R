@@ -20,7 +20,7 @@ library(data.table) #binding with missing columns
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Set the WildTrax version ----
-v.wt <- "2026-03-02"
+v.wt <- "2026-03-09"
 
 #4. Set the eBird version ----
 v.ebd <- "Jan-2026"
@@ -84,7 +84,7 @@ ebd.tidy <- ebd.unique |>
 ebd.loc <- ebd.tidy |> 
   dplyr::select(latitude, longitude) |> 
   unique() |> 
-  mutate(location_id = row_number() + max(all.wide$location_id))
+  mutate(location_id = row_number() + max(wt.wide$location_id))
   
 #5. Make wide ----
 ebd.wide <- ebd.tidy |> 
