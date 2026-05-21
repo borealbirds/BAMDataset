@@ -12,6 +12,8 @@
 
 #There are a handful of projects that are not downloading properly via wildRtrax due to special characters. An issue is open on this. These projects are listed in the error.log object. This output should be reviewed and any additional datasets desired should be downloaded manually and incorporated into the dataset in script 02. Note that many of these datasets are single species call rate datasets that will be of less interest for BAM's purposes.
 
+#Projects that are removed for exclusion are projects for which we have access to the entire organization (e.g., CWS), but where the organization managers would prefer we exclude the projects from the dataset. This is instead of providing access to individual projects within the organization, which can be unwieldy for large organization. Hopefully, and "exclude" button will be available within WildTrax sharing in the future.
+
 #PREAMBLE############################
 
 #1. Load packages----
@@ -35,6 +37,9 @@ proj.pc <- wt_get_projects("PC")
 proj <- rbind(proj.aru, proj.pc) |> 
   dplyr::filter(project_status!="Test Only",
                 tasks_completed > 0)
+
+#3. Remove projects for exclusion ----
+cwson_ex <- read.csv(file.path(root, "Dataset Assessment", "Exclusion", "bioacoustics_projects_metadata-CWS_ONT.csv"))
 
 #DOWNLOAD ###############
 
