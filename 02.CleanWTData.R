@@ -10,6 +10,8 @@
 
 #Note that surveys done with acoustic recorders and transcribed to point count and stored in the point count sensor (survey_distance_method=="0m-INF-ARU") are assigned a point count method type because they are legacy data that were likely transcribed through continuous listening without the use of a spectrogram.
 
+#TODO: REMOVE QC tasks
+
 #PREAMBLE############################
 
 #1. Load packages----
@@ -65,7 +67,7 @@ pc.tidy <- pc |>
   mutate(method = "PC",
          duration = as.integer(str_extract(survey_duration_method,
                                            "(?<=-)[0-9]+(?=min?)"))*60,
-         distance = ifelse(str_sub(survey_distance_method, -3, -1) %in% c("INF", "ARU"), Inf,
+         distance = ifelse(str_sub(survey_distance_method, -3, -1) %in% c("INF", "ARU") | survey_distance_method=="UNKNOWN", Inf,
                            as.integer(str_extract(survey_distance_method,
                                                   "(?<=-)[0-9]+(?=m?)"))),
          max_noise_type = NA,
@@ -84,6 +86,8 @@ wt.tidy <- rbind(aru.tidy, pc.tidy)
 #filter to approximately North America
 #clean up some bird codes
 #only use species with 4 letter codes
+#remove QC tasks that should not be used
+#remove ARU tasks with too much noise
 wt.use <- wt.tidy  |> 
   dplyr::filter(method!="None",
                 status %in% c("t", "TRUE"),
