@@ -14,6 +14,8 @@
 
 #Projects that are removed for exclusion are projects for which we have access to the entire organization (e.g., CWS), but where the organization managers would prefer we exclude the projects from the dataset. This is instead of providing access to individual projects within the organization, which can be unwieldy for large organization. Hopefully, and "exclude" button will be available within WildTrax sharing in the future.
 
+#TODO: FINISH RESTRICTING PROJECT DOWNLOAD AS PER PARTNER REQUESTS
+
 #PREAMBLE############################
 
 #1. Load packages----
@@ -39,7 +41,7 @@ proj <- rbind(proj.aru, proj.pc) |>
                 tasks_completed > 0)
 
 #3. Remove projects for exclusion ----
-cwson_ex <- read.csv(file.path(root, "Dataset Assessment", "Exclusion", "bioacoustics_projects_metadata-CWS_ONT.csv"))
+#cwson_ex <- read.csv(file.path(root, "Dataset Assessment", "Exclusion", "bioacoustics_projects_metadata-CWS_ONT.csv"))
 
 #DOWNLOAD ###############
 
