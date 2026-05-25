@@ -117,4 +117,6 @@ for(i in 1:nrow(error)){
 }
 
 #5. Save date stamped data & project list----
-save(aru.wt, pc.wt, proj, error.log, file=file.path(root, "WildTrax", Sys.Date(), paste0("01_wildtrax_raw_", Sys.Date(), ".Rdata")))
+out_dir = file.path(root, "WildTrax", Sys.Date())
+if (!dir.exists(out_dir)) dir.create(out_dir)
+save(aru.wt, pc.wt, proj, error.log, file=file.path(out_dir, paste0("01_wildtrax_raw_", Sys.Date(), ".Rdata")))

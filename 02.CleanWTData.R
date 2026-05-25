@@ -17,6 +17,7 @@
 #1. Load packages----
 library(tidyverse) #basic data wrangling
 library(wildrtrax) #to tidy data from wildtrax
+library(readxl)
 
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
@@ -26,10 +27,12 @@ source("WTlogin.R")
 wt_auth()
 
 #4. Set the WT version ----
-v.wt <- "2026-03-09"
+v.wt <- "2026-05-25"
 
 #5. Get the downloaded data object ----
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
+
+bad_tasks = read_xlsx(file.path(root, "Dataset Assessment", "Exclusion", "Retenu_visite.xlsx"))
 
 # HELPER FUNCTIONS ########
 
