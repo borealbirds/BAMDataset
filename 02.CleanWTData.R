@@ -92,6 +92,12 @@ aru.good = aru %>%
   dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
   # estimate counts in the event of "too many to track" detections
   wt_replace_tmtt() %>%
+  # remove erroneous noise
+  dplyr::filter(max_noise_volume!="Extreme" | is.na(max_noise_volume), !max_noise_type %in% c("ARU Malfunction") | is.na(max_noise_type)) %>%
+  # remove tasks labeled as bad by the "bad_tasks" dataframe
+  left_join(bad_tasks, by = join_by(task_id == task_id, project_id == project_id, location == location, recording_date_time == recording_date_time)) %>%
+  mutate(Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite)) %>%
+  dplyr::filter(Retenu_Visite == "oui") %>%
   # remove anything with buffered locations or for which the task has not been completed yet
   dplyr::filter(is.na(location_buffer_m) | location_buffer_m == 0, task_is_complete %in% c("TRUE", "t")) %>%
   remove_bad_dates(col = "recording_date_time", begin_date = BEGIN_DATE, end_date = v.wt) %>%
@@ -133,6 +139,10 @@ pc.good = pc %>%
   # remove non-birds
   wt_tidy_species(remove=c("abiotic", "insect", "human")) %>%
   dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
+  # remove tasks labeled as bad by the "bad_tasks" dataframe
+  left_join(bad_tasks, by = join_by(survey_id == task_id, project_id == project_id, location == location, survey_date == recording_date_time)) %>%
+  mutate(Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite)) %>%
+  dplyr::filter(Retenu_Visite == "oui") %>%
   # remove anything with buffered locations or for which the task has not been completed yet
   dplyr::filter(is.na(location_buffer_m) | location_buffer_m == 0) %>%
   remove_bad_dates(col = "survey_date", begin_date = BEGIN_DATE, end_date = v.wt) %>%
@@ -146,9 +156,12 @@ pc.good = pc %>%
   ungroup
 
 pc.species.count.info = pc.good %>%
-  distinct(organization, project_id, location_id, longitude, latitude, survey_id, species_code, individual_count) %>%
+  group_by(organization, project_id, location_id, longitude, latitude, survey_id, survey_date, species_code) %>%
+  mutate(total_count = sum(individual_count)) %>%
+  ungroup %>% 
+  distinct(organization, project_id, location_id, longitude, latitude, survey_id, survey_date, species_code, total_count) %>%
   group_by(species_code) %>%
-  mutate(upper_q = pmax(MIN_PC_COUNT_CUTOFF, quantile(individual_count, 0.999))) %>%
+  mutate(upper_q = pmax(MIN_PC_COUNT_CUTOFF, quantile(total_count, 0.999))) %>%
   ungroup %>%
   distinct(species_code, upper_q)
 
@@ -186,21 +199,13 @@ wt.tidy <- rbind(aru.tidy, pc.tidy)
 #remove QC tasks that should not be used
 #remove ARU tasks with too much noise
 wt.use <- wt.tidy  |> 
-  dplyr::filter(method!="None",
-                status %in% c("t", "TRUE"),
-                (max_noise_volume!="Extreme" | is.na(max_noise_volume)),
-                (!max_noise_type %in% c("ARU Malfunction") | is.na(max_noise_type)),
-                (is.na(location_buffer_m) | location_buffer_m==0),
+  dplyr::filter(method != "None",
                 !is.na(duration),
                 !is.na(distance),
                 !is.na(latitude),
                 !is.na(date_time),
                 str_length(species)==4,
-                species!="4794",
-                latitude > 10,
-                latitude < 85,
-                longitude < -52,
-                longitude > -168) |> 
+                species!="4794") |> 
   mutate(species = case_when(species=="GRAJ" ~ "CAJA",
                              species=="PSFL" ~ "WEFL",
                              species=="MEGU" ~ "COGU",
@@ -215,4 +220,4 @@ wt.wide <- wt.use |>
   dplyr::select(-status, -location_buffer_m, -max_noise_type, -max_noise_volume)
 
 #4. Save ----
-save(wt.wide, file=file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
+save(wt.wide, aru.good, pc.good.final, file = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
