@@ -110,6 +110,10 @@ aru.good = aru %>%
   # remove duplicate detections of the same individual by grouping along "individual_order" and selecting the minimum (first) detection
   group_by(project_id, location_id, longitude, latitude, task_id, recording_id, recording_date_time, species_code, individual_order) %>%
   dplyr::filter(detection_time == min(detection_time)) %>%
+  # keep only valid individual counts
+  mutate(individual_count = as.numeric(individual_count),
+         individual_count = ifelse(is.na(individual_count), 1, individual_count)) %>%
+  dplyr::filter(individual_count > 0) %>%
   ungroup
   
 #3. Tidy and format ----
