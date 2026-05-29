@@ -98,11 +98,13 @@ aru.wt <- aru.list[!sapply(aru.list, is.null)]
 pc.wt <- pc.list[!sapply(pc.list, is.null)]
 
 #3. Get the list of errored projects ----
-error <- data.frame(file = list.files(file.path(root, "WildTrax", "website downloads (error projects)"))) |> 
-  separate(file, into=c("sensor", "project_id", "report"), remove=FALSE)
+error <- tryCatch({
+  data.frame(file = list.files(file.path(root, "WildTrax", "website downloads (error projects)"))) %>% 
+    separate(file, into=c("sensor", "project_id", "report"), remove=FALSE)},
+  error = function(e) data.frame())
 
 #4. Read in errored files ----
-for(i in 1:nrow(error)){
+for(i in seq_len(nrow(error))){
   
   if(error$sensor[i]=="ARU"){
     aru.wt[[length(aru.wt)+1]] <- read.csv(file.path(root, "WildTrax", "website downloads (error projects)", error$file[i]))

@@ -10,8 +10,6 @@
 
 #Note that surveys done with acoustic recorders and transcribed to point count and stored in the point count sensor (survey_distance_method=="0m-INF-ARU") are assigned a point count method type because they are legacy data that were likely transcribed through continuous listening without the use of a spectrogram.
 
-#TODO: REMOVE QC tasks
-
 #PREAMBLE############################
 
 #1. Load packages----
@@ -27,7 +25,7 @@ source("WTlogin.R")
 wt_auth()
 
 #4. Set the WT version ----
-v.wt <- "2026-05-25"
+v.wt <- "2026-05-28"
 
 #5. Get the downloaded data object ----
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))

@@ -5,10 +5,10 @@ library(doParallel)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
-# root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 root <- "inputs"
+# root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
-v.wt <- "2026-05-25"
+v.wt <- "2026-05-28"
 load(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
 
 MAX_DIST = 1000 # in m
@@ -64,7 +64,8 @@ qpad_fits = foreach(sp = all_species) %dopar% {
     mutate(r_lo = r_lo * R_SCALE,
            r_up = r_up * R_SCALE,
            r_mxs = r_max * R_SCALE,
-           r_max = MAX_DIST * R_SCALE) 
+           r_max = MAX_DIST * R_SCALE,
+           type = "pc") 
   
   aru_rtmb_ready = aru_this %>%
     mutate(r_lo = 0,
@@ -74,8 +75,9 @@ qpad_fits = foreach(sp = all_species) %dopar% {
            t_up = detection_time * T_SCALE,
            t_max = task_duration * T_SCALE,
            count = individual_count,
-           r_mxs = r_max) %>%
-    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, longitude, latitude, date = recording_date_time)
+           r_mxs = r_max,
+           type = "aru") %>%
+    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, longitude, latitude, date = recording_date_time, type)
   
   all_rtmb_ready = rbind(pc_rtmb_ready, aru_rtmb_ready)
   
@@ -83,28 +85,42 @@ qpad_fits = foreach(sp = all_species) %dopar% {
   closed_cov = cov_dynamic_raster(cov_name = "open_closed",
                                   raster_dir = file.path("data", "scanfi_biomass_agg"),
                                   method = "nearest")
-  solar_angle_cov = cov_suncalc(cov_name = "solar_angle",
-                                type = "altitude")
-  d_solar_angle_cov = cov_suncalc(cov_name = "d_solar_angle",
-                                  type = "d_altitude")
+  t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise",
+                                   type = "sunrise")
+  t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset",
+                                  type = "sunset")
   
   closed_cov_values = with(all_rtmb_ready, closed_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
-  solar_angle_values = with(all_rtmb_ready, solar_angle_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
-  d_solar_angle_values = with(all_rtmb_ready, d_solar_angle_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
+  sunrise_values = with(all_rtmb_ready, t_since_rise_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
+  sunset_values = with(all_rtmb_ready, t_since_set_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
   
   all_rtmb_ready = all_rtmb_ready %>% 
     mutate(open_closed = closed_cov_values / max(closed_cov_values),
-           sol_angle = solar_angle_values,
-           d_sol_angle = d_solar_angle_values / max(abs(d_solar_angle_values)),
-           d_sol_angle_2 = d_sol_angle ^ 2,
-           d_sol_angle_2_sol_angle = d_sol_angle_2 * sol_angle)
+           t_since_sunrise = sunrise_values,
+           t_since_sunset = sunset_values,
+           dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 2,
+           midday = t_since_sunrise >= 2 & t_since_sunset < 0.5,
+           dusk = t_since_sunset >= -0.5 & t_since_sunset < 2,
+           night = !(dawn | midday | dusk))
   
-  obj_pc = try(fit_jqpadmix(pc_rtmb_ready, formula_alpha = ~ open_closed, formula_lambda = ~ sol_angle + d_sol_angle + d_sol_angle_2 + d_sol_angle_2_sol_angle, return_data = TRUE))
-  obj_aru = try(fit_jqpadmix(aru_rtmb_ready, formula_alpha = ~ open_closed, formula_lambda = ~ sol_angle + d_sol_angle + d_sol_angle_2 + d_sol_angle_2_sol_angle, return_data = TRUE))
-  obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = ~ open_closed, formula_lambda = ~ sol_angle + d_sol_angle + d_sol_angle_2 + d_sol_angle_2_sol_angle, return_data = TRUE, fit = FALSE)
+  pc_rtmb_ready_cov = all_rtmb_ready %>% dplyr::filter(type == "pc")
+  aru_rtmb_ready_cov = all_rtmb_ready %>% dplyr::filter(type == "aru")
   
-  list(full = obj, pc = obj_pc, aru = obj_aru)
+  lambda_covs_formula = ~ 0 + night + dawn + midday + dusk
+  alpha_covs_formula = ~ open_closed
+  
+  obj_pc_null = try(fit_jqpadmix(pc_rtmb_ready_cov, return_data = TRUE))
+  # obj_aru_null = try(fit_jqpadmix(aru_rtmb_ready_cov, return_data = TRUE))
+  # obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE)
+  
+  obj_pc = try(fit_jqpadmix(pc_rtmb_ready_cov, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE))
+  # obj_aru = try(fit_jqpadmix(aru_rtmb_ready_cov, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE))
+  # obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE)
+  
+  list(full = obj_pc, null = obj_pc_null)
   
 }
+
+names(qpad_fits) = all_species
 
 save(qpad_fits, file = file.path(root, "WildTrax", v.wt, paste0("05_qpad_estimates_", v.wt, ".Rdata")))
