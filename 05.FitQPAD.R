@@ -5,7 +5,7 @@ library(doParallel)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
-root <- "inputs"
+root <- "data"
 # root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 v.wt <- "2026-05-28"
@@ -24,8 +24,8 @@ registerDoParallel(cores = ncores)
 
 qpad_fits = foreach(sp = all_species) %dopar% {
   
-  aru_this = aru.good %>% dplyr::filter(species_code == SP, !is.na(individual_count))
-  pc_this = pc.good.final %>% dplyr::filter(species_code == SP, !is.na(individual_count))
+  aru_this = aru.good %>% dplyr::filter(species_code == sp, !is.na(individual_count))
+  pc_this = pc.good.final %>% dplyr::filter(species_code == sp, !is.na(individual_count))
   
   pc_rtmb_ready = pc_this %>%
     # correct names for distance and duration methods
