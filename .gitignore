@@ -42,6 +42,9 @@ vignettes/*.pdf
 # pkgdown site
 docs/
 
+# any temporarily stored data
+data/
+
 # translation temp files
 po/*~
 

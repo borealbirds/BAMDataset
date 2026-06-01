@@ -18,11 +18,12 @@ T_SCALE = 1 / 60 # seconds to minutes
 all_species = unique(pc.good.final$species_code)
 
 # Set up parallelization
+# sp = all_species[1]
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
 if (is.na(ncores)) ncores = 5
 registerDoParallel(cores = ncores)
 
-qpad_fits = foreach(sp = all_species) %dopar% {
+qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
   
   aru_this = aru.good %>% dplyr::filter(species_code == sp, !is.na(individual_count))
   pc_this = pc.good.final %>% dplyr::filter(species_code == sp, !is.na(individual_count))
@@ -118,6 +119,7 @@ qpad_fits = foreach(sp = all_species) %dopar% {
   # obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE)
   
   list(full = obj_pc, null = obj_pc_null)
+  # qpad_fits = list(full = obj_pc, null = obj_pc_null)
   
 }
 

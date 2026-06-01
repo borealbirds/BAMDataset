@@ -17,6 +17,8 @@ library(tidyverse) #basic data wrangling
 library(wildrtrax) #to tidy data from wildtrax
 library(readxl)
 
+lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
+
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
@@ -113,7 +115,7 @@ aru.good = aru %>%
          individual_count = ifelse(is.na(individual_count), 1, individual_count)) %>%
   dplyr::filter(individual_count > 0) %>%
   ungroup
-  
+
 #3. Tidy and format ----
 #we have to filter to the first detection for each "individual_order" because some individuals have multiple tags
 aru.tidy <- aru.good |> 
@@ -128,7 +130,7 @@ aru.tidy <- aru.good |>
   group_by(organization, project_id, location_id, location_buffer_m, longitude, latitude, survey_id, date_time, status, method, duration, distance, max_noise_type, max_noise_volume, species) |> 
   summarize(count = sum(individual_count)) |> 
   ungroup()
-  
+
 #TIDY PC DATA############
 
 #1. Collapse to a single dataframe ----
@@ -213,6 +215,34 @@ wt.use <- wt.tidy  |>
                              species=="MEGU" ~ "COGU",
                              !is.na(species) ~ species))
 rm(wt.tidy)
+
+wt_species_kdes = with(wt.use, make_individual_kdes(longitude, latitude, date_time, id = species, levels = 0.99, verbose = 1, min_locs = 50))
+
+# wt.use = wt.use %>%
+#   arrange(species)
+# wt_species_vect = vect(wt.use, geom = c("longitude", "latitude"), crs = add_EPSG(4326))
+# 
+# wt.use$d_kde_bound = unlist(lapply(unique(wt.use$species), function(sp) {
+#   
+#   message("beginning ", sp)
+#   this_species = wt_species_vect[wt.use$species == sp, ]
+#   this_kde = wt_species_kdes[wt_species_kdes$name == sp, ]
+#   if (nrow(this_kde) == 0) return(rep(NA, nrow(this_species)))
+#   
+#   terra::distance(this_species, this_kde)
+#   
+# }))
+# 
+# d_nearest_conspecific = sapply(1:nrow(wt.use), function(row){
+#   
+#   if (row %% 100 == 0) message("beginning row ", row)
+#   this_ind = wt_species_vect[row, ]
+#   other_conspecifics = wt_species_vect[wt.use$species == this_ind$species, ]
+#   conspecific_dists = terra::distance(other_conspecifics, this_ind)
+#   
+#   min(conspecific_dists[conspecific_dists > 0])
+#   
+# })
 
 #3. Make wide ----
 #we don't use wt_make_wide() because we're using a different format now
