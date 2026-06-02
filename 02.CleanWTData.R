@@ -27,7 +27,7 @@ source("WTlogin.R")
 wt_auth()
 
 #4. Set the WT version ----
-v.wt <- "2026-05-28"
+v.wt <- "2026-06-02"
 
 #5. Get the downloaded data object ----
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
@@ -92,6 +92,8 @@ aru.good = aru %>%
   dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
   # estimate counts in the event of "too many to track" detections
   wt_replace_tmtt() %>%
+  # remove any non-numeric values for individual_count
+  dplyr::filter(individual_count > 0) %>%
   # remove erroneous noise
   dplyr::filter(max_noise_volume!="Extreme" | is.na(max_noise_volume), !max_noise_type %in% c("ARU Malfunction") | is.na(max_noise_type)) %>%
   # remove tasks labeled as bad by the "bad_tasks" dataframe
@@ -110,10 +112,6 @@ aru.good = aru %>%
   # remove duplicate detections of the same individual by grouping along "individual_order" and selecting the minimum (first) detection
   group_by(project_id, location_id, longitude, latitude, task_id, recording_id, recording_date_time, species_code, individual_order) %>%
   dplyr::filter(detection_time == min(detection_time)) %>%
-  # keep only valid individual counts
-  mutate(individual_count = as.numeric(individual_count),
-         individual_count = ifelse(is.na(individual_count), 1, individual_count)) %>%
-  dplyr::filter(individual_count > 0) %>%
   ungroup
 
 #3. Tidy and format ----
@@ -151,14 +149,17 @@ pc.good = pc %>%
   dplyr::filter(is.na(location_buffer_m) | location_buffer_m == 0) %>%
   remove_bad_dates(col = "survey_date", begin_date = BEGIN_DATE, end_date = v.wt) %>%
   remove_bad_coordinates(lon_keep = c(-171, -52), lat_keep = c(30, 90), lon_flip = c(0, 170)) %>%
-  # remove any counts above the 99.9% quantile for the species (or 10)
+  # remove any surveys with an individual count of 0
   mutate(individual_count = as.numeric(individual_count),
-         individual_count = ifelse(is.na(individual_count), 1, individual_count)) %>%
-  dplyr::filter(individual_count > 0) %>%
+         individual_count = ifelse(is.na(individual_count), 0, individual_count)) %>%
+  group_by(survey_id) %>%
+  dplyr::filter(all(individual_count > 0)) %>%
+  ungroup %>%
   group_by(organization, project_id, location_id, longitude, latitude, survey_id, species_code) %>%
   mutate(total_count = sum(individual_count)) %>%
   ungroup
 
+# remove any counts above the 99.9% quantile for the species (or 10)
 pc.species.count.info = pc.good %>%
   group_by(organization, project_id, location_id, longitude, latitude, survey_id, survey_date, species_code) %>%
   mutate(total_count = sum(individual_count)) %>%
@@ -216,8 +217,10 @@ wt.use <- wt.tidy  |>
                              !is.na(species) ~ species))
 rm(wt.tidy)
 
-wt_species_kdes = with(wt.use, make_individual_kdes(longitude, latitude, date_time, id = species, levels = 0.99, verbose = 1, min_locs = 50))
-
+# PRT : experimenting with some filters for removing errnoenous species reports, but going to leave this uncommented for now because takes a long time
+# library(terra)
+# wt_species_kdes = with(wt.use, make_individual_kdes(longitude, latitude, date_time, id = species, levels = 0.99, verbose = 1, min_locs = 50))
+# 
 # wt.use = wt.use %>%
 #   arrange(species)
 # wt_species_vect = vect(wt.use, geom = c("longitude", "latitude"), crs = add_EPSG(4326))
