@@ -27,7 +27,7 @@ source("WTlogin.R")
 wt_auth()
 
 #4. Set the WT version ----
-v.wt <- "2026-05-28"
+v.wt <- "2026-06-02"
 
 #5. Get the downloaded data object ----
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
@@ -110,10 +110,6 @@ aru.good = aru %>%
   # remove duplicate detections of the same individual by grouping along "individual_order" and selecting the minimum (first) detection
   group_by(project_id, location_id, longitude, latitude, task_id, recording_id, recording_date_time, species_code, individual_order) %>%
   dplyr::filter(detection_time == min(detection_time)) %>%
-  # keep only valid individual counts
-  mutate(individual_count = as.numeric(individual_count),
-         individual_count = ifelse(is.na(individual_count), 1, individual_count)) %>%
-  dplyr::filter(individual_count > 0) %>%
   ungroup
 
 #3. Tidy and format ----
@@ -151,14 +147,17 @@ pc.good = pc %>%
   dplyr::filter(is.na(location_buffer_m) | location_buffer_m == 0) %>%
   remove_bad_dates(col = "survey_date", begin_date = BEGIN_DATE, end_date = v.wt) %>%
   remove_bad_coordinates(lon_keep = c(-171, -52), lat_keep = c(30, 90), lon_flip = c(0, 170)) %>%
-  # remove any counts above the 99.9% quantile for the species (or 10)
+  # remove any surveys with an individual count of 0
   mutate(individual_count = as.numeric(individual_count),
-         individual_count = ifelse(is.na(individual_count), 1, individual_count)) %>%
-  dplyr::filter(individual_count > 0) %>%
+         individual_count = ifelse(is.na(individual_count), 0, individual_count)) %>%
+  group_by(survey_id) %>%
+  dplyr::filter(all(individual_count > 0)) %>%
+  ungroup %>%
   group_by(organization, project_id, location_id, longitude, latitude, survey_id, species_code) %>%
   mutate(total_count = sum(individual_count)) %>%
   ungroup
 
+# remove any counts above the 99.9% quantile for the species (or 10)
 pc.species.count.info = pc.good %>%
   group_by(organization, project_id, location_id, longitude, latitude, survey_id, survey_date, species_code) %>%
   mutate(total_count = sum(individual_count)) %>%
