@@ -92,6 +92,8 @@ aru.good = aru %>%
   dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
   # estimate counts in the event of "too many to track" detections
   wt_replace_tmtt() %>%
+  # remove any non-numeric values for individual_count
+  dplyr::filter(individual_count > 0) %>%
   # remove erroneous noise
   dplyr::filter(max_noise_volume!="Extreme" | is.na(max_noise_volume), !max_noise_type %in% c("ARU Malfunction") | is.na(max_noise_type)) %>%
   # remove tasks labeled as bad by the "bad_tasks" dataframe
@@ -215,8 +217,10 @@ wt.use <- wt.tidy  |>
                              !is.na(species) ~ species))
 rm(wt.tidy)
 
-wt_species_kdes = with(wt.use, make_individual_kdes(longitude, latitude, date_time, id = species, levels = 0.99, verbose = 1, min_locs = 50))
-
+# PRT : experimenting with some filters for removing errnoenous species reports, but going to leave this uncommented for now because takes a long time
+# library(terra)
+# wt_species_kdes = with(wt.use, make_individual_kdes(longitude, latitude, date_time, id = species, levels = 0.99, verbose = 1, min_locs = 50))
+# 
 # wt.use = wt.use %>%
 #   arrange(species)
 # wt_species_vect = vect(wt.use, geom = c("longitude", "latitude"), crs = add_EPSG(4326))
