@@ -11,6 +11,9 @@ root <- getwd() # if not running on cluster, comment this out
 v.wt <- "2026-06-02"
 load(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
 
+qpad_dir_out = file.path(root, "WildTrax", v.wt, "qpad_fits")
+if (!dir.exists(qpad_dir_out)) dir.create(qpad_dir_out)
+
 MAX_DIST = 1000 # in m
 R_SCALE = 1 / 1000 # m to km
 T_SCALE = 1 / 60 # seconds to minutes
@@ -119,11 +122,11 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
   # obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE)
   
   message("completed ", sp, ": ", Sys.time())
-  list(full = obj_pc, null = obj_pc_null)
+  saveRDS(list(full = obj_pc, null = obj_pc_null), file.path(qpad_dir_out, paste0(sp, ".rds")))
+  0
   # qpad_fits = list(full = obj_pc, null = obj_pc_null)
   
 }
 
-names(qpad_fits) = all_species
-
-save(qpad_fits, file = file.path(root, "WildTrax", v.wt, paste0("05_qpad_estimates_", v.wt, ".Rdata")))
+# names(qpad_fits) = all_species
+# save(qpad_fits, file = file.path(root, "WildTrax", v.wt, paste0("05_qpad_estimates_", v.wt, ".Rdata")))
