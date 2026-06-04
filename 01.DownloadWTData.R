@@ -103,6 +103,8 @@ aru.wt <- aru.list[!sapply(aru.list, is.null)]
 pc.wt <- pc.list[!sapply(pc.list, is.null)]
 
 #3. Get the list of errored projects ----
+#Note most are published-map only projects that we don't have organization-level access. We don't filter these out earlier because we do have access to some published-map only projects for which we have organization access.
+
 error <- tryCatch({
   data.frame(file = list.files(file.path(root, "WildTrax", "website downloads (error projects)"))) %>% 
     separate(file, into=c("sensor", "project_id", "report"), remove=FALSE)},
