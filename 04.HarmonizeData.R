@@ -20,7 +20,7 @@ library(data.table) #binding with missing columns
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Set the WildTrax version ----
-v.wt <- "2026-03-09"
+v.wt <- "2026-06-02"
 
 #4. Set the eBird version ----
 v.ebd <- "Jan-2026"
