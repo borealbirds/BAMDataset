@@ -5,17 +5,36 @@ library(doParallel)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
-root <- "data"
-# root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
+root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
+root <- getwd() # if not running on cluster, comment this out
 
-v.wt <- "2026-05-28"
+v.wt <- "2026-06-02"
 load(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
+
+qpad_dir_out = file.path(root, "WildTrax", v.wt, "qpad_fits")
+if (!dir.exists(qpad_dir_out)) dir.create(qpad_dir_out)
 
 MAX_DIST = 1000 # in m
 R_SCALE = 1 / 1000 # m to km
 T_SCALE = 1 / 60 # seconds to minutes
 
 all_species = unique(pc.good.final$species_code)
+
+# Extract covariates
+closed_cov = cov_dynamic_raster(cov_name = "open_closed",
+                                raster_dir = file.path("data", "scanfi_biomass_agg"),
+                                method = "nearest")
+t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise",
+                                 type = "sunrise")
+t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset",
+                                type = "sunset")
+
+aru.good$open_closed = with(aru.good, closed_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
+aru.good$t_since_sunrise = with(aru.good, t_since_rise_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
+aru.good$t_since_sunset = with(aru.good, t_since_set_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
+pc.good.final$open_closed = with(pc.good.final, closed_cov$get(longitude, latitude, survey_date, crs_in = "EPSG:4326"))
+pc.good.final$t_since_sunrise = with(pc.good.final, t_since_rise_cov$get(longitude, latitude, survey_date, crs_in = "EPSG:4326"))
+pc.good.final$t_since_sunset = with(pc.good.final, t_since_set_cov$get(longitude, latitude, survey_date, crs_in = "EPSG:4326"))
 
 # Set up parallelization
 # sp = all_species[1]
@@ -24,6 +43,8 @@ if (is.na(ncores)) ncores = 5
 registerDoParallel(cores = ncores)
 
 qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
+  
+  message("beginning ", sp, ": ", Sys.time())
   
   aru_this = aru.good %>% dplyr::filter(species_code == sp, !is.na(individual_count))
   pc_this = pc.good.final %>% dplyr::filter(species_code == sp, !is.na(individual_count))
@@ -61,7 +82,7 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
            t_up = as.numeric(str_split_i(detection_time, "(-|[a-z])+", -2))) %>% 
     # remove sightings without any duration bins
     dplyr::filter(n_distance_bins > 1 | n_duration_bins > 1) %>%
-    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count, longitude, latitude, date = survey_date) %>%
+    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count, open_closed, t_since_sunrise, t_since_sunset) %>%
     mutate(r_lo = r_lo * R_SCALE,
            r_up = r_up * R_SCALE,
            r_mxs = r_max * R_SCALE,
@@ -78,28 +99,10 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
            count = individual_count,
            r_mxs = r_max,
            type = "aru") %>%
-    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, longitude, latitude, date = recording_date_time, type)
+    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, open_closed, t_since_sunrise, t_since_sunset, type)
   
-  all_rtmb_ready = rbind(pc_rtmb_ready, aru_rtmb_ready)
-  
-  # Extract covariates
-  closed_cov = cov_dynamic_raster(cov_name = "open_closed",
-                                  raster_dir = file.path("data", "scanfi_biomass_agg"),
-                                  method = "nearest")
-  t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise",
-                                   type = "sunrise")
-  t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset",
-                                  type = "sunset")
-  
-  closed_cov_values = with(all_rtmb_ready, closed_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
-  sunrise_values = with(all_rtmb_ready, t_since_rise_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
-  sunset_values = with(all_rtmb_ready, t_since_set_cov$get(longitude, latitude, date, crs_in = "EPSG:4326"))
-  
-  all_rtmb_ready = all_rtmb_ready %>% 
-    mutate(open_closed = closed_cov_values / max(closed_cov_values),
-           t_since_sunrise = sunrise_values,
-           t_since_sunset = sunset_values,
-           dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 2,
+  all_rtmb_ready = rbind(pc_rtmb_ready, aru_rtmb_ready) %>% 
+    mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 2,
            midday = t_since_sunrise >= 2 & t_since_sunset < 0.5,
            dusk = t_since_sunset >= -0.5 & t_since_sunset < 2,
            night = !(dawn | midday | dusk))
@@ -118,11 +121,12 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
   # obj_aru = try(fit_jqpadmix(aru_rtmb_ready_cov, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE))
   # obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE)
   
-  list(full = obj_pc, null = obj_pc_null)
+  message("completed ", sp, ": ", Sys.time())
+  saveRDS(list(full = obj_pc, null = obj_pc_null), file.path(qpad_dir_out, paste0(sp, ".rds")))
+  0
   # qpad_fits = list(full = obj_pc, null = obj_pc_null)
   
 }
 
-names(qpad_fits) = all_species
-
-save(qpad_fits, file = file.path(root, "WildTrax", v.wt, paste0("05_qpad_estimates_", v.wt, ".Rdata")))
+# names(qpad_fits) = all_species
+# save(qpad_fits, file = file.path(root, "WildTrax", v.wt, paste0("05_qpad_estimates_", v.wt, ".Rdata")))
