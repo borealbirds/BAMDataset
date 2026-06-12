@@ -17,6 +17,8 @@ if (!dir.exists(qpad_dir_out)) dir.create(qpad_dir_out)
 MAX_DIST = 1000 # in m
 R_SCALE = 1 / 1000 # m to km
 T_SCALE = 1 / 60 # seconds to minutes
+DEG_CRS = "EPSG:4326"
+INITS = c(0, 1)
 
 all_species = unique(pc.good.final$species_code)
 
@@ -35,7 +37,7 @@ aru_final = aru.good %>%
          count = individual_count,
          r_mxs = r_max,
          type = "aru") %>%
-  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, type)
+  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, longitude, latitude, date = recording_date_time, type)
 
 pc_final = pc.good.final %>%
   dplyr::filter(!is.na(individual_count)) %>%
@@ -71,7 +73,7 @@ pc_final = pc.good.final %>%
          t_up = as.numeric(str_split_i(detection_time, "(-|[a-z])+", -2))) %>% 
   # remove sightings without any duration bins
   dplyr::filter(n_distance_bins > 1 | n_duration_bins > 1) %>%
-  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count) %>%
+  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count, longitude, latitude, date = survey_date) %>%
   mutate(r_lo = r_lo * R_SCALE,
          r_up = r_up * R_SCALE,
          r_mxs = r_max * R_SCALE,
@@ -88,9 +90,9 @@ closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path
 t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise", type = "sunrise")
 t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset", type = "sunset")
 
-all_final$open_closed = with(all_final, closed_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
-all_final$t_since_sunrise = with(all_final, t_since_rise_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
-all_final$t_since_sunset = with(all_final, t_since_set_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
+all_final$open_closed = with(all_final, closed_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
+all_final$t_since_sunrise = with(all_final, t_since_rise_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
+all_final$t_since_sunset = with(all_final, t_since_set_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 
 # Set up parallelization
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
@@ -109,11 +111,8 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
            dusk = t_since_sunset >= -1 & t_since_sunset < 0.5,
            night = !(dawn | midday | morning | dusk))
   
-  pc_rtmb_ready_cov = all_rtmb_ready %>% dplyr::filter(type == "pc")
-  aru_rtmb_ready_cov = all_rtmb_ready %>% dplyr::filter(type == "aru")
-  
-  obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = c(0, 1), profile_improve_stop = 1)
-  obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = c(0, 1), profile_improve_stop = 1)
+  obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
+  obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
   
   message("completed ", sp, ": ", Sys.time())
   saveRDS(list(full = obj, null = obj_null), file.path(qpad_dir_out, paste0(sp, ".rds")))
