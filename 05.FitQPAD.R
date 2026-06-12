@@ -20,24 +20,79 @@ T_SCALE = 1 / 60 # seconds to minutes
 
 all_species = unique(pc.good.final$species_code)
 
-# Extract covariates
-closed_cov = cov_dynamic_raster(cov_name = "open_closed",
-                                raster_dir = file.path("data", "scanfi_biomass_agg"),
-                                method = "nearest")
-t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise",
-                                 type = "sunrise")
-t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset",
-                                type = "sunset")
+lambda_covs_formula = ~ 0 + night + dawn + morning + midday + dusk
+alpha_covs_formula = ~ open_closed
 
-aru.good$open_closed = with(aru.good, closed_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
-aru.good$t_since_sunrise = with(aru.good, t_since_rise_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
-aru.good$t_since_sunset = with(aru.good, t_since_set_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
-pc.good.final$open_closed = with(pc.good.final, closed_cov$get(longitude, latitude, survey_date, crs_in = "EPSG:4326"))
-pc.good.final$t_since_sunrise = with(pc.good.final, t_since_rise_cov$get(longitude, latitude, survey_date, crs_in = "EPSG:4326"))
-pc.good.final$t_since_sunset = with(pc.good.final, t_since_set_cov$get(longitude, latitude, survey_date, crs_in = "EPSG:4326"))
+# Prepare PC and ARU data for RTMB models - do it now so it's a bit faster ----
+aru_final = aru.good %>%
+  dplyr::filter(!is.na(individual_count)) %>%
+  mutate(r_lo = 0,
+         r_up = MAX_DIST * R_SCALE,
+         r_max = MAX_DIST * R_SCALE,
+         t_lo = detection_time * T_SCALE,
+         t_up = detection_time * T_SCALE,
+         t_max = task_duration * T_SCALE,
+         count = individual_count,
+         r_mxs = r_max,
+         type = "aru") %>%
+  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, type)
+
+pc_final = pc.good.final %>%
+  dplyr::filter(!is.na(individual_count)) %>%
+  # correct names for distance and duration methods
+  mutate(detection_distance = case_match(detection_distance,
+                                         "UNKNOWN" ~ "0m-INF",
+                                         "0m-INF_ARU" ~ "0m-INF",
+                                         NA ~ "0m-INF",
+                                         .default = detection_distance),
+         survey_distance_method = ifelse(detection_distance == "0m-INF", "0m-INF", survey_distance_method),
+         survey_distance_method = case_match(survey_distance_method,
+                                             "UNKNOWN" ~ "0m-INF",
+                                             "0m-INF_ARU" ~ "0m-INF",
+                                             NA ~ "0m-INF",
+                                             .default = survey_distance_method),
+         # replace all "INF" with the maximum distance 
+         survey_distance_method = str_replace_all(survey_distance_method, "INF", paste0(MAX_DIST, "m")),
+         detection_distance = str_replace_all(detection_distance, "INF", paste0(MAX_DIST, "m")),
+         survey_duration_method = ifelse(detection_time == "UNKNOWN", paste0("0-", str_split_i(survey_duration_method, "-", -1)), survey_duration_method),
+         detection_time = ifelse(detection_time == "UNKNOWN", paste0("0-", str_split_i(survey_duration_method, "-", -1)), detection_time),
+         survey_duration_method = case_match(survey_duration_method,
+                                             "0-3-5-10-10min+" ~ "0-3-5-10min",
+                                             .default = survey_duration_method),
+         n_distance_bins = str_count(survey_distance_method, "-"),
+         n_duration_bins = str_count(survey_duration_method, "-"),
+         n_distance_bins = ifelse(is.na(n_distance_bins), 1, n_distance_bins),
+         n_duration_bins = ifelse(is.na(n_duration_bins), 1, n_duration_bins),
+         r_max = as.numeric(str_split_i(survey_distance_method, "(-|[a-z])+", -2)),
+         t_max = as.numeric(str_split_i(survey_duration_method, "(-|[a-z])+", -2)),
+         r_lo = as.numeric(str_split_i(detection_distance, "(-|[a-z])+", 1)),
+         r_up = as.numeric(str_split_i(detection_distance, "(-|[a-z])+", -2)),
+         t_lo = as.numeric(str_split_i(detection_time, "(-|[a-z])+", 1)),
+         t_up = as.numeric(str_split_i(detection_time, "(-|[a-z])+", -2))) %>% 
+  # remove sightings without any duration bins
+  dplyr::filter(n_distance_bins > 1 | n_duration_bins > 1) %>%
+  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count) %>%
+  mutate(r_lo = r_lo * R_SCALE,
+         r_up = r_up * R_SCALE,
+         r_mxs = r_max * R_SCALE,
+         r_max = MAX_DIST * R_SCALE,
+         type = "pc") 
+
+all_final = rbind(pc_final, aru_final)
+
+rm(pc.good.final, wt.wide, aru.good, pc_final, aru_final)
+gc()
+
+# Extract covariates ----
+closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path("data", "scanfi_biomass_agg"), method = "nearest")
+t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise", type = "sunrise")
+t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset", type = "sunset")
+
+all_final$open_closed = with(all_final, closed_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
+all_final$t_since_sunrise = with(all_final, t_since_rise_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
+all_final$t_since_sunset = with(all_final, t_since_set_cov$get(longitude, latitude, recording_date_time, crs_in = "EPSG:4326"))
 
 # Set up parallelization
-# sp = all_species[1]
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
 if (is.na(ncores)) ncores = 5
 registerDoParallel(cores = ncores)
@@ -46,83 +101,22 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
   
   message("beginning ", sp, ": ", Sys.time())
   
-  aru_this = aru.good %>% dplyr::filter(species_code == sp, !is.na(individual_count))
-  pc_this = pc.good.final %>% dplyr::filter(species_code == sp, !is.na(individual_count))
-  
-  pc_rtmb_ready = pc_this %>%
-    # correct names for distance and duration methods
-    mutate(detection_distance = case_match(detection_distance,
-                                           "UNKNOWN" ~ "0m-INF",
-                                           "0m-INF_ARU" ~ "0m-INF",
-                                           NA ~ "0m-INF",
-                                           .default = detection_distance),
-           survey_distance_method = ifelse(detection_distance == "0m-INF", "0m-INF", survey_distance_method),
-           survey_distance_method = case_match(survey_distance_method,
-                                               "UNKNOWN" ~ "0m-INF",
-                                               "0m-INF_ARU" ~ "0m-INF",
-                                               NA ~ "0m-INF",
-                                               .default = survey_distance_method),
-           # replace all "INF" with the maximum distance 
-           survey_distance_method = str_replace_all(survey_distance_method, "INF", paste0(MAX_DIST, "m")),
-           detection_distance = str_replace_all(detection_distance, "INF", paste0(MAX_DIST, "m")),
-           survey_duration_method = ifelse(detection_time == "UNKNOWN", paste0("0-", str_split_i(survey_duration_method, "-", -1)), survey_duration_method),
-           detection_time = ifelse(detection_time == "UNKNOWN", paste0("0-", str_split_i(survey_duration_method, "-", -1)), detection_time),
-           survey_duration_method = case_match(survey_duration_method,
-                                               "0-3-5-10-10min+" ~ "0-3-5-10min",
-                                               .default = survey_duration_method),
-           n_distance_bins = str_count(survey_distance_method, "-"),
-           n_duration_bins = str_count(survey_duration_method, "-"),
-           n_distance_bins = ifelse(is.na(n_distance_bins), 1, n_distance_bins),
-           n_duration_bins = ifelse(is.na(n_duration_bins), 1, n_duration_bins),
-           r_max = as.numeric(str_split_i(survey_distance_method, "(-|[a-z])+", -2)),
-           t_max = as.numeric(str_split_i(survey_duration_method, "(-|[a-z])+", -2)),
-           r_lo = as.numeric(str_split_i(detection_distance, "(-|[a-z])+", 1)),
-           r_up = as.numeric(str_split_i(detection_distance, "(-|[a-z])+", -2)),
-           t_lo = as.numeric(str_split_i(detection_time, "(-|[a-z])+", 1)),
-           t_up = as.numeric(str_split_i(detection_time, "(-|[a-z])+", -2))) %>% 
-    # remove sightings without any duration bins
-    dplyr::filter(n_distance_bins > 1 | n_duration_bins > 1) %>%
-    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count, open_closed, t_since_sunrise, t_since_sunset) %>%
-    mutate(r_lo = r_lo * R_SCALE,
-           r_up = r_up * R_SCALE,
-           r_mxs = r_max * R_SCALE,
-           r_max = MAX_DIST * R_SCALE,
-           type = "pc") 
-  
-  aru_rtmb_ready = aru_this %>%
-    mutate(r_lo = 0,
-           r_up = MAX_DIST * R_SCALE,
-           r_max = MAX_DIST * R_SCALE,
-           t_lo = detection_time * T_SCALE,
-           t_up = detection_time * T_SCALE,
-           t_max = task_duration * T_SCALE,
-           count = individual_count,
-           r_mxs = r_max,
-           type = "aru") %>%
-    dplyr::select(r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, open_closed, t_since_sunrise, t_since_sunset, type)
-  
-  all_rtmb_ready = rbind(pc_rtmb_ready, aru_rtmb_ready) %>% 
-    mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 2,
-           midday = t_since_sunrise >= 2 & t_since_sunset < 0.5,
-           dusk = t_since_sunset >= -0.5 & t_since_sunset < 2,
-           night = !(dawn | midday | dusk))
+  all_rtmb_ready = all_final %>%
+    dplyr::filter(species_code == sp) %>% 
+    mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
+           morning = t_since_sunrise >= 1 & t_since_sunrise < 5,
+           midday = t_since_sunrise >= 5 & t_since_sunset < -1,
+           dusk = t_since_sunset >= -1 & t_since_sunset < 0.5,
+           night = !(dawn | midday | morning | dusk))
   
   pc_rtmb_ready_cov = all_rtmb_ready %>% dplyr::filter(type == "pc")
   aru_rtmb_ready_cov = all_rtmb_ready %>% dplyr::filter(type == "aru")
   
-  lambda_covs_formula = ~ 0 + night + dawn + midday + dusk
-  alpha_covs_formula = ~ open_closed
-  
-  obj_pc_null = try(fit_jqpadmix(pc_rtmb_ready_cov, return_data = TRUE))
-  # obj_aru_null = try(fit_jqpadmix(aru_rtmb_ready_cov, return_data = TRUE))
-  # obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE)
-  
-  obj_pc = try(fit_jqpadmix(pc_rtmb_ready_cov, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE))
-  # obj_aru = try(fit_jqpadmix(aru_rtmb_ready_cov, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE))
-  # obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE)
+  obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = c(0, 1), profile_improve_stop = 1)
+  obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = c(0, 1), profile_improve_stop = 1)
   
   message("completed ", sp, ": ", Sys.time())
-  saveRDS(list(full = obj_pc, null = obj_pc_null), file.path(qpad_dir_out, paste0(sp, ".rds")))
+  saveRDS(list(full = obj, null = obj_null), file.path(qpad_dir_out, paste0(sp, ".rds")))
   0
   # qpad_fits = list(full = obj_pc, null = obj_pc_null)
   

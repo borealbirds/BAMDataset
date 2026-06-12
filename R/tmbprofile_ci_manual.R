@@ -210,7 +210,7 @@ tmbprofile_slice_manual = function(obj,
   require(doParallel)
   
   # TO DO fix this so you don't have to submit bounds for parameters you don't care about
-  if (nrow(bounds) < length(obj$par)) {
+  if (nrow(bounds) < length(par_ind)) {
     bounds = bounds[rep(1, length(obj$par)), ]
     warning("Not enough bounds have been supplied. Using first row for all parameters")
   }
@@ -237,6 +237,8 @@ tmbprofile_slice_manual = function(obj,
     
     if (verbose > 0) message("Starting slice for pars[", i, "] = ", names(obj$par[i]))
     
+    bound_ind = which(par_ind == i)
+    
     # Generate new versions of the function and gradient that take 1 less parameter
     new_fn = function(par, pf = par_in[i]) {
       obj$fn(par %*% I_PAR[-i, ] + pf %*% I_PAR[i, ])
@@ -246,11 +248,11 @@ tmbprofile_slice_manual = function(obj,
       obj$gr(par %*% I_PAR[-i, ] + pf %*% I_PAR[i, ]) %*% I_PAR[, -i]
     }
     
-    par_seq_i = seq(bounds[i, 1], bounds[i, 2], length.out = n_slices)
+    par_seq_i = seq(bounds[bound_ind, 1], bounds[bound_ind, 2], length.out = n_slices)
     data.frame(par = par_seq_i,  value = sapply(par_seq_i, function(pf_i) {
       if (verbose > 1) message("---->Optimizing with pars[", i, "] = ", round(pf_i, 3))
       
-      if (start_adapt & pf_i != bounds[i, 1]) {
+      if (start_adapt & pf_i != bounds[bound_ind, 1]) {
         opt_init = obj$env$last.par[-i]
       } else {
         opt_init = par_in[-i]

@@ -4,6 +4,7 @@
 # method: optimization method; currently only "nlminb", "L-BFGS-B", "bobyqa" are allowed
 # verbose: extent of print output provided. If 0, nothing at all, if 1, minimal output, if 2, prints parameters for every function call, also see tmbprofile_ci_manual which receives this argument
 # profile_max: integer > 0; number of times to profile before stopping
+# profile_improve_stop: numeric >= 0; how much better does the new likelihood value have to be to keep going?
 # eval_max: integer > 0; number of function evaluations allowed during each optimization, passed to internal model fitting functions
 # iter_max: integer > 0; number of algorithm iterations allowed during each optimization (NOT for the overall fitting algorithm)
 #
@@ -13,8 +14,10 @@ mle = function(obj,
                method = c("nlminb", "BFGS", "bobyqa"),
                verbose = 0,
                profile_max = 10,
+               profile_improve_stop = 0,
                eval_max = 1e5,
-               iter_max = 1e5) {
+               iter_max = 1e5,
+               ...) {
   
   # Within this function we will change the amount of print output produced by the TMB model object according to the user supplied verbose argument. To save the original values (thus not altering the user-facing behavior of the object outside of this function), we use an on.exit() call to set them back once the function is done running.
   input_obj_mgc = obj$env$tracemgc
@@ -23,6 +26,8 @@ mle = function(obj,
   on.exit({obj$env$tracepar = input_obj_par})
   
   method = match.arg(method)
+  
+  profile_improve_stop = pmax(profile_improve_stop, 0)
   
   fit_fun = function(par) {
     if (method == "nlminb") return(nlminb(par, obj$fn, obj$gr, control = list(eval.max = eval_max, iter.max = iter_max)))
@@ -49,7 +54,7 @@ mle = function(obj,
     
     # Compare "best_value" (the old MLE) to whatever the new best value is according to the function. If it's better, we run the profile again to see if we can further determine new optima.
     new_best_value = obj$fn(obj$env$last.par.best)
-    run_profile = new_best_value < best_value
+    run_profile = new_best_value < (best_value - profile_improve_stop)
     
   }
   

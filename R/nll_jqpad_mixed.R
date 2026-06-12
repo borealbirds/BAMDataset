@@ -182,6 +182,7 @@ envpar_to_list = function(envpar) {
 # formula_alpha: formula object describing which covariates should go into alpha
 # n_integral: integer > 0; for integral approximation
 # fct_integral: numeric between 0 and 1 (exclusive); for integral approximation
+# inits: numeric of length 2; initial values for first component of lambda and alpha; all other components always start at 0
 # fit: logical; if TRUE, fits the model as well as returning the RTMB model object
 # return_data: logical; if TRUE, returns the data object used for RTMB
 # ...: additional arguments to mle() (only relevant if fit is TRUE)
@@ -192,6 +193,7 @@ fit_jqpadmix = function(data_in,
                         formula_alpha = ~ 1,
                         n_integral = 150,
                         fct_integral = 0.96,
+                        inits = c(0, 0),
                         fit = TRUE,
                         return_data = FALSE,
                         ...) {
@@ -221,8 +223,8 @@ fit_jqpadmix = function(data_in,
   if (lambda_intercept > 0) this_lambda_covs = cbind(1, this_lambda_covs)
   if (alpha_intercept > 0) this_alpha_covs = cbind(1, this_alpha_covs)
   
-  this_init_par = list(log_lambda_q = numeric(ncol(this_lambda_covs)),
-                       log_alpha_q = numeric(ncol(this_alpha_covs)))
+  this_init_par = list(log_lambda_q = c(inits[1], numeric(ncol(this_lambda_covs) - 1)),
+                       log_alpha_q = c(inits[2], numeric(ncol(this_alpha_covs) - 1)))
   
   integral_info = qfun(n_integral, fct_integral)
   
