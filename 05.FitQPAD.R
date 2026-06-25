@@ -80,7 +80,11 @@ pc_final = pc.good.final %>%
          r_max = MAX_DIST * R_SCALE,
          type = "pc") 
 
-all_final = rbind(pc_final, aru_final)
+all_final = rbind(pc_final, aru_final) %>%
+  group_by(species_code) %>%
+  mutate(n_this_sp = n()) %>%
+  ungroup %>%
+  arrange(-n_this_sp, species_code)
 
 rm(pc.good.final, wt.wide, aru.good, pc_final, aru_final)
 gc()
@@ -99,27 +103,36 @@ ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("
 if (is.na(ncores)) ncores = 5
 registerDoParallel(cores = ncores)
 
-qpad_fits = foreach(sp = all_species, .errorhandling = "pass") %dopar% {
+qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
   
-  message("beginning ", sp, ": ", Sys.time())
+  qpad_fit_dir_out = file.path(qpad_dir_out, paste0(sp, ".rds"))
   
-  all_rtmb_ready = all_final %>%
-    dplyr::filter(species_code == sp) %>% 
-    mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
-           morning = t_since_sunrise >= 1 & t_since_sunrise < 5,
-           midday = t_since_sunrise >= 5 & t_since_sunset < -1,
-           dusk = t_since_sunset >= -1 & t_since_sunset < 0.5,
-           night = !(dawn | midday | morning | dusk))
-  
-  obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
-  obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
-  
-  message("completed ", sp, ": ", Sys.time())
-  saveRDS(list(full = obj, null = obj_null), file.path(qpad_dir_out, paste0(sp, ".rds")))
+  if (file.exists(qpad_fit_dir_out)) {
+    message(sp, " is already done. ", Sys.time())
+  } else {
+    message("beginning ", sp, ": ", Sys.time())
+    
+    all_rtmb_ready = all_final %>%
+      dplyr::filter(species_code == sp) %>% 
+      mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
+             morning = t_since_sunrise >= 1 & t_since_sunrise < 5,
+             midday = t_since_sunrise >= 5 & t_since_sunset < -1,
+             dusk = t_since_sunset >= -1 & t_since_sunset < 0.5,
+             night = !(dawn | midday | morning | dusk))
+    
+    obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
+    obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
+    
+    message("completed ", sp, ": ", Sys.time())
+    saveRDS(list(full = obj, null = obj_null), qpad_fit_dir_out)
+  }
   0
   # qpad_fits = list(full = obj_pc, null = obj_pc_null)
   
 }
+
+error_fits = !sapply(qpad_fits, is.numeric)
+if (any(error_fits)) message("Fits that returned errors: [", paste0(all_species[error_fits], collapse = ", "), "]")
 
 # names(qpad_fits) = all_species
 # save(qpad_fits, file = file.path(root, "WildTrax", v.wt, paste0("05_qpad_estimates_", v.wt, ".Rdata")))
