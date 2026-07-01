@@ -112,7 +112,9 @@ aru.good = aru %>%
   # remove duplicate detections of the same individual by grouping along "individual_order" and selecting the minimum (first) detection
   group_by(project_id, location_id, longitude, latitude, task_id, recording_id, recording_date_time, species_code, individual_order) %>%
   dplyr::filter(detection_time == min(detection_time)) %>%
-  ungroup
+  ungroup %>%
+  # rename task ID's so they don't overlap with point counts
+  mutate(task_id = paste0("ARU_", task_id))
 
 #3. Tidy and format ----
 #we have to filter to the first detection for each "individual_order" because some individuals have multiple tags
@@ -157,7 +159,9 @@ pc.good = pc %>%
   ungroup %>%
   group_by(organization, project_id, location_id, longitude, latitude, survey_id, species_code) %>%
   mutate(total_count = sum(individual_count)) %>%
-  ungroup
+  ungroup %>%
+  # rename task ID's so they don't overlap with ARU surveys
+  mutate(survey_id = paste0("PC_", survey_id))
 
 # remove any counts above the 99.9% quantile for the species (or 10)
 pc.species.count.info = pc.good %>%
@@ -194,16 +198,23 @@ pc.tidy <- pc.good.final |>
 #PUT TOGETHER#########
 
 #1. Combine ----
-wt.tidy <- rbind(aru.tidy, pc.tidy)
+wt.tidy <- rbind(aru.tidy, pc.tidy) %>%
+  # group together observations of the same species that are split up (e.g., from point counts with different distances) and sum
+  group_by(survey_id, species) %>%
+  mutate(count = sum(count)) %>%
+  ungroup %>%
+  distinct(survey_id, species, .keep_all = TRUE)
 
 #2. Filter out tasks we don't want ----
+DEG_DECIMALS = 3 # for rounding lat's and lon's - maybe if I want to be more precise I can eventually convert to UTMs and use a real spatial unit but I think this is fine for now
+TIME_ROUND = "10 minutes"
 
 #filter to approximately North America
 #clean up some bird codes
 #only use species with 4 letter codes
 #remove QC tasks that should not be used
 #remove ARU tasks with too much noise
-wt.use <- wt.tidy  |> 
+wt.use.dups <- wt.tidy  |> 
   dplyr::filter(method != "None",
                 !is.na(duration),
                 !is.na(distance),
@@ -214,8 +225,41 @@ wt.use <- wt.tidy  |>
   mutate(species = case_when(species=="GRAJ" ~ "CAJA",
                              species=="PSFL" ~ "WEFL",
                              species=="MEGU" ~ "COGU",
-                             !is.na(species) ~ species))
-rm(wt.tidy)
+                             !is.na(species) ~ species)) 
+
+wt_dup_info = wt.use.dups %>%
+  # identify and remove duplicate (or near-duplicate) observations
+  mutate(lat_rounded = round(latitude, DEG_DECIMALS),
+         lon_rounded = round(longitude, DEG_DECIMALS),
+         dttm_rounded = round_date(date_time, TIME_ROUND)) %>%
+  group_by(survey_id) %>%
+  mutate(all_species = paste0(rep(species, count), collapse = "_")) %>%
+  ungroup %>%
+  distinct(survey_id, .keep_all = TRUE) %>%
+  # remove this because it's useless for dataframes where each row corresponds to a survey
+  dplyr::select(-species, -count) %>%
+  # arrange by duration because this is the "tie-breaker" that will be used to determine which surveys we keep. if two "duplicate" surveys have the same duration we just decide by survey_id.
+  arrange(dttm_rounded, lat_rounded, lon_rounded, -duration, -distance, survey_id) %>%
+  group_by(lat_rounded, lon_rounded, dttm_rounded) %>%
+  mutate(n_dups = n(),
+         keep = c(1, numeric(n() - 1))) %>%
+  ungroup
+
+wt_duplicate_surveys = wt_dup_info %>%
+  dplyr::filter(keep == 0) %>%
+  pull(survey_id)
+
+wt.use = wt.use.dups %>%
+  dplyr::filter(!(survey_id %in% wt_duplicate_surveys))
+
+# also remove these from PC and ARU only datasets that are used to fit QPAD models
+aru.good = aru.good %>%
+  dplyr::filter(task_id %in% wt.use$survey_id)
+
+pc.good.final = pc.good.final %>%
+  dplyr::filter(survey_id %in% wt.use$survey_id)
+
+rm(wt.tidy, wt.use.dups, wt_dup_info)
 
 # PRT : experimenting with some filters for removing errnoenous species reports, but going to leave this uncommented for now because takes a long time
 # library(terra)

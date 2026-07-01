@@ -90,7 +90,10 @@ rm(pc.good.final, wt.wide, aru.good, pc_final, aru_final)
 gc()
 
 # Extract covariates ----
-closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path("data", "scanfi_biomass_agg"), method = "nearest")
+scanfi_raster_dir = "~/School/BAM/QPAD_PRT/data/scanfi_biomass_agg"
+scanfi_raster_dir = file.path("data", "scanfi_biomass_agg") # if not running on cluster, comment this out
+
+closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = scanfi_raster_dir, method = "nearest")
 t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise", type = "sunrise")
 t_since_set_cov = cov_timeofday(cov_name = "t_since_sunset", type = "sunset")
 
