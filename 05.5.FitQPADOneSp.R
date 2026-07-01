@@ -1,5 +1,7 @@
 library(tidyverse)
 library(RTMB)
+library(terra)
+library(sf)
 library(foreach)
 library(doParallel)
 
