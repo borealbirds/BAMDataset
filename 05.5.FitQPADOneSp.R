@@ -8,7 +8,7 @@ library(doParallel)
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
-root <- getwd() # if not running on cluster, comment this out
+# root <- getwd() # if not running on cluster, comment this out
 
 v.wt <- "2026-06-02"
 load(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
@@ -24,7 +24,7 @@ INITS = c(0, 1)
 
 all_species = unique(pc.good.final$species_code)
 
-lambda_covs_formula = ~ 0 + night + dawn + morning + midday + dusk
+lambda_covs_formula = ~ 0 + dawn + morning + midday + dusk + night + highlat
 alpha_covs_formula = ~ open_closed
 
 # Prepare PC and ARU data for RTMB models - do it now so it's a bit faster ----
@@ -93,7 +93,7 @@ gc()
 
 # Extract covariates ----
 scanfi_raster_dir = "~/School/BAM/QPAD_PRT/data/scanfi_biomass_agg"
-scanfi_raster_dir = file.path("data", "scanfi_biomass_agg") # if not running on cluster, comment this out
+# scanfi_raster_dir = file.path("data", "scanfi_biomass_agg") # if not running on cluster, comment this out
 
 closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = scanfi_raster_dir, method = "nearest")
 t_since_rise_cov = cov_timeofday(cov_name = "t_since_sunrise", type = "sunrise")
@@ -109,7 +109,7 @@ all_final$t_since_sunset = with(all_final, t_since_set_cov$get(longitude, latitu
 # registerDoParallel(cores = ncores)
 
 # qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
-sp = "WOTH"
+sp = "GCTH"
 
 qpad_fit_dir_out = file.path(qpad_dir_out, paste0(sp, ".rds"))
 
@@ -120,11 +120,14 @@ if (file.exists(qpad_fit_dir_out)) {
   
   all_rtmb_ready = all_final %>%
     dplyr::filter(species_code == sp) %>% 
-    mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
+    mutate(t_since_sunrise = ifelse(is.na(t_since_sunrise), Inf, t_since_sunrise),
+           t_since_sunset = ifelse(is.na(t_since_sunset), Inf, t_since_sunset),
+           dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
            morning = t_since_sunrise >= 1 & t_since_sunrise < 5,
            midday = t_since_sunrise >= 5 & t_since_sunset < -1,
            dusk = t_since_sunset >= -1 & t_since_sunset < 0.5,
-           night = !(dawn | midday | morning | dusk))
+           night = !(dawn | midday | morning | dusk),
+           highlat = is.infinite(t_since_sunrise) | is.infinite(t_since_sunset))
   
   obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
   obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1)

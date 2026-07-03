@@ -1,5 +1,7 @@
 library(tidyverse)
 library(RTMB)
+library(terra)
+library(sf)
 library(foreach)
 library(doParallel)
 
@@ -21,8 +23,9 @@ DEG_CRS = "EPSG:4326"
 INITS = c(0, 1)
 
 all_species = unique(pc.good.final$species_code)
+all_species = c("WOTH", "GCTH")
 
-lambda_covs_formula = ~ 0 + night + dawn + morning + midday + dusk
+lambda_covs_formula = ~ 0 + dawn + morning + midday + dusk + night + highlat
 alpha_covs_formula = ~ open_closed
 
 # Prepare PC and ARU data for RTMB models - do it now so it's a bit faster ----
@@ -114,11 +117,14 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
     
     all_rtmb_ready = all_final %>%
       dplyr::filter(species_code == sp) %>% 
-      mutate(dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
+      mutate(t_since_sunrise = ifelse(is.na(t_since_sunrise), Inf, t_since_sunrise),
+             t_since_sunset = ifelse(is.na(t_since_sunset), Inf, t_since_sunset),
+             dawn = t_since_sunrise >= -0.5 & t_since_sunrise < 1,
              morning = t_since_sunrise >= 1 & t_since_sunrise < 5,
              midday = t_since_sunrise >= 5 & t_since_sunset < -1,
              dusk = t_since_sunset >= -1 & t_since_sunset < 0.5,
-             night = !(dawn | midday | morning | dusk))
+             night = !(dawn | midday | morning | dusk),
+             highlat = is.infinite(t_since_sunrise) | is.infinite(t_since_sunset))
     
     obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
     obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
