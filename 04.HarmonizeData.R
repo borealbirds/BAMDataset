@@ -94,8 +94,25 @@ ebd.wide <- ebd.tidy |>
 
 #6. Put together ----
 #sort the species
+DEG_DECIMALS = 3 # for rounding lat's and lon's - maybe if I want to be more precise I can eventually convert to UTMs and use a real spatial unit but I think this is fine for now
+TIME_ROUND = "1 minute"
+
 all.wide <- rbindlist(list(wt.wide, ebd.wide), fill=TRUE)
-dat <- all.wide |> 
+
+all_wide_no_dups = all.wide %>%
+  mutate(lon_rounded = round(longitude, DEG_DECIMALS),
+         lat_rounded = round(latitude, DEG_DECIMALS),
+         time_rounded = round_date(date_time, TIME_ROUND),
+         method_sort = as.integer(factor(method, levels = c("PC", "1SPT", "1SPM", "1SPM Audio/Visual hybrid", "eBird")))) %>%
+  # sort by priority for keeping based on project
+  arrange(method_sort, date_time) %>%
+  group_by(lat_rounded, lon_rounded, time_rounded) %>%
+  mutate(n_dups = n(),
+         keep = c(1, numeric(n() - 1))) %>%
+  ungroup %>%
+  dplyr::filter(keep == 1)
+
+dat <- all_wide_no_dups |> 
   select(all_of(colnms), sort(setdiff(names(all.wide), all_of(colnms)))) |> 
   mutate(across(-colnms, replace_na, 0))
 

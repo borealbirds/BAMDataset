@@ -23,7 +23,7 @@ DEG_CRS = "EPSG:4326"
 INITS = c(0, 1)
 
 all_species = unique(pc.good.final$species_code)
-all_species = c("WOTH", "GCTH")
+# all_species = c("WOTH", "GCTH")
 
 lambda_covs_formula = ~ 0 + dawn + morning + midday + dusk + night + highlat
 alpha_covs_formula = ~ open_closed
