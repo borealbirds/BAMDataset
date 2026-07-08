@@ -7,6 +7,7 @@
 # profile_improve_stop: numeric >= 0; how much better does the new likelihood value have to be to keep going?
 # eval_max: integer > 0; number of function evaluations allowed during each optimization, passed to internal model fitting functions
 # iter_max: integer > 0; number of algorithm iterations allowed during each optimization (NOT for the overall fitting algorithm)
+# return_ci: logical; if TRUE, returns a table with confidence intervals
 #
 # Returns a model fit from nlminb() or some other function (see "method")
 mle = function(obj,
@@ -17,6 +18,7 @@ mle = function(obj,
                profile_improve_stop = 0,
                eval_max = 1e5,
                iter_max = 1e5,
+               return_ci = FALSE,
                ...) {
   
   # Within this function we will change the amount of print output produced by the TMB model object according to the user supplied verbose argument. To save the original values (thus not altering the user-facing behavior of the object outside of this function), we use an on.exit() call to set them back once the function is done running.
@@ -59,6 +61,25 @@ mle = function(obj,
   }
   
   # Fit the model, now starting at the best parameter value, just in case some neighboring parameter combination is a little better. Return this as the function output.
-  fit_fun(obj$env$last.par.best)
+  out = fit_fun(obj$env$last.par.best)
+  
+  # If we are to return a confidence interval table, generate that table here
+  if (return_ci) {
+    
+    # if possible, we don't want to rerun the profile because it can be slow. if the function value at the optimum is similar to the best value identified by the final optimization, we just use the last profile from the algorithm above. if there is no profile, we run one.
+    rerun_profile = is(try(pr), "try-error") || (obj$fn(obj$env$last.par.best) < (pr[[1]]$cur_nll[1] - profile_improve_stop))
+    if (rerun_profile) {
+      pr = tmbprofile_ci_manual(obj, verbose = verbose, opt_method = method)
+    }
+    
+    # convert to table and replace the "est" column with the actual MLE in case they differ
+    pr_table = profile_to_table(pr)
+    pr_table$est = obj$fn(obj$env$last.par.best)
+    
+    out = list(fit = out, ci_table = pr_table)
+    
+  }
+  
+  out
   
 }

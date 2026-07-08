@@ -185,6 +185,8 @@ envpar_to_list = function(envpar) {
 # inits: numeric of length 2; initial values for first component of lambda and alpha; all other components always start at 0
 # fit: logical; if TRUE, fits the model as well as returning the RTMB model object
 # return_data: logical; if TRUE, returns the data object used for RTMB
+# return_hess: logical; if TRUE, returns the value of the Hessian matrix at the optimum
+# return_prof: logical; if TRUE, returns the likelihood profile at the optimum
 # ...: additional arguments to mle() (only relevant if fit is TRUE)
 #
 # Returns an RTMB model object if fit = FALSE as well as a model fit if fit = TRUE
@@ -196,6 +198,7 @@ fit_jqpadmix = function(data_in,
                         inits = c(0, 0),
                         fit = TRUE,
                         return_data = FALSE,
+                        return_hess = FALSE,
                         ...) {
   
   terms_lambda = terms(formula_lambda)
@@ -239,13 +242,18 @@ fit_jqpadmix = function(data_in,
   
   obj = RTMB::MakeADFun(this_nll, parameters = this_init_par)
   
-  if (!fit && !return_data) return(obj)
-  if (!fit) return(list(obj = obj, dat = rtmb_data_in))
-  if (!return_data) return(list(obj = obj, fit = mle(obj, ...)))
-
-  list(obj = obj,
-       fit = mle(obj, ...),
-       dat = rtmb_data_in)
+  res = list(obj = obj)
+  
+  if (fit) res$fit = mle(obj, ...)
+  if (return_data) res$dat = rtmb_data_in
+  if (return_hess) res$hessian = obj$he(obj$env$last.par.best)
+  # if we supplied "return_ci" argument to mle(...) as TRUE, grab the confidence interval table and make it part of the object
+  if ("fit" %in% names(res) && all(names(res$fit) == c("fit", "ci_table"))) {
+    res$ci_table = res$fit$ci_table
+    res$fit = res$fit$fit
+  }
+  
+  res
   
 }
 
