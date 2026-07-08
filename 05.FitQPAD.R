@@ -126,8 +126,8 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
              night = !(dawn | midday | morning | dusk),
              highlat = is.infinite(t_since_sunrise) | is.infinite(t_since_sunset))
     
-    obj_null = fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
-    obj = fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1)
+    obj_null = try(fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1))
+    obj = try(fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1))
     
     message("completed ", sp, ": ", Sys.time())
     saveRDS(list(full = obj, null = obj_null), qpad_fit_dir_out)
