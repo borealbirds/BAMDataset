@@ -33,8 +33,11 @@ load(file.path(root, paste0("04_BAMDataset_WT-", v.wt, "_EBd-", v.ebd,  ".Rdata"
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
 
 #3. Identify project ids to remove ----
+# As per communication from CWS-NOR (Eamon Riordan-Short) and CWS-ON (Kevin Hannah)
 ids <- proj |> 
-  dplyr::filter(organization_name=="CWS-NOR" & project_status!="Published - Public")
+  dplyr::filter(organization_name=="CWS-NOR" |
+                organization_name=="CWS-ONT" & str_detect(project, "HADMU")) |> 
+  dplyr::filter(project_status!="Published - Public")
 
 #4. Filter ----
 dat <- dat |> 
