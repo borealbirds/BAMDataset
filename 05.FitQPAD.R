@@ -130,7 +130,8 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
              dawn = timeofday == "dawn",
              day = timeofday == "day",
              sunset = timeofday == "sunset",
-             night = timeofday == "night")
+             night = timeofday == "night",
+             open_closed = open_close / max(open_closed))
     
     obj_null = try(fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1, return_hess = TRUE, return_ci = TRUE))
     obj = try(fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1, return_hess = TRUE, return_ci = TRUE))
