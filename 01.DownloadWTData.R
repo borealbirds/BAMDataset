@@ -51,10 +51,11 @@ proj <- rbind(proj.aru, proj.pc) |>
 #DOWNLOAD ###############
 
 #1. Set up loop ----
-aru.list <- list()
-pc.list <- list()
+n_proj = nrow(proj)
+aru.list <- vector(mode = "list", length = n_proj)
+pc.list <- vector(mode = "list", length = n_proj)
 error.log <- data.frame()
-for(i in 1:nrow(proj)){
+for(i in seq_len(n_proj)){
   
   #authenticate each time because this loop takes forever
   wt_auth()
@@ -89,6 +90,37 @@ for(i in 1:nrow(proj)){
   }
   
   print(paste0("Finished dataset ", proj$project[i], " : ", i, " of ", nrow(proj), " projects"))
+  
+}
+
+for (i in seq_len(n_proj)) {
+  
+  if (!is.data.frame(pc.list[[i]]) && !is.data.frame(aru.list[[i]])) {
+    message("retrying i = ", i)
+    
+    if(proj$project_sensor[i]=="ARU"){
+      
+      dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "ARU", report = "main"))
+      
+      if("data.frame" %in% class(dat.try)){
+        aru.list[[i]] <- dat.try
+      }
+      
+    }
+    
+    if(proj$project_sensor[i]=="PC"){
+      
+      dat.try <- try(wt_download_report(project_id = proj$project_id[i], "PC", report="main"))
+      
+      if("data.frame" %in% class(dat.try)){
+        pc.list[[i]] <- dat.try
+      }
+      
+    }
+    
+    if ("data.frame" %in% class(dat.try)) error.log = error.log %>% dplyr::filter(project_id != proj$project_id[i])
+    
+  }
   
 }
 

@@ -10,7 +10,7 @@ lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 root <- getwd() # if not running on cluster, comment this out
 
-v.wt <- "2026-06-02"
+v.wt <- "2026-07-10"
 load(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
 
 qpad_dir_out = file.path(root, "WildTrax", v.wt, "qpad_fits")
@@ -25,7 +25,7 @@ INITS = c(0, 1)
 all_species = unique(pc.good.final$species_code)
 # all_species = c("WOTH", "GCTH")
 
-lambda_covs_formula = ~ 0 + dawn + sunrise + day + sunset + night
+lambda_covs_formula = ~ 0 + morning + sunrise + day + sunset + night + nauticaldawn + nauticaldusk + is_pointcount
 alpha_covs_formula = ~ open_closed
 
 # Prepare PC and ARU data for RTMB models - do it now so it's a bit faster ----
@@ -100,6 +100,8 @@ t_since_dawn_cov = cov_timeofday(cov_name = "t_since_dawn", type = "dawn")
 t_since_golden_cov = cov_timeofday(cov_name = "t_since_golden", type = "goldenHour")
 t_since_nadir_cov = cov_timeofday(cov_name = "t_since_nadir", type = "nadir")
 t_since_dusk_cov = cov_timeofday(cov_name = "t_since_dusk", type = "dusk")
+t_since_ndusk_cov = cov_timeofday(cov_name = "t_since_nauticaldusk", type = "nauticalDusk")
+t_since_ndawk_cov = cov_timeofday(cov_name = "t_since_nauticaldawn", type = "nauticalDawn")
 
 all_final$open_closed = with(all_final, closed_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 all_final$t_since_sunrise = with(all_final, t_since_sunrise_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
@@ -108,6 +110,8 @@ all_final$t_since_dawn = with(all_final, t_since_dawn_cov$get(longitude, latitud
 all_final$t_since_golden = with(all_final, t_since_golden_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 all_final$t_since_nadir = with(all_final, t_since_nadir_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 all_final$t_since_dusk = with(all_final, t_since_dusk_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
+all_final$t_since_nauticaldusk = with(all_final, t_since_ndusk_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
+all_final$t_since_nauticaldawn = with(all_final, t_since_ndawk_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 
 # Set up parallelization
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
@@ -125,13 +129,16 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
     
     all_rtmb_ready = all_final %>%
       dplyr::filter(species_code == sp) %>% 
-      mutate(timeofday = get_tod(t_since_dawn, t_since_sunrise, t_since_goldenend, t_since_golden, t_since_dusk, t_since_nadir),
+      mutate(timeofday = get_tod(t_since_nauticaldawn, t_since_dawn, t_since_sunrise, t_since_goldenend, t_since_golden, t_since_dusk, t_since_nauticaldusk, t_since_nadir),
+             nauticaldawn = timeofday == "nauticaldawn",
              sunrise = timeofday == "sunrise",
-             dawn = timeofday == "dawn",
+             morning = timeofday == "morning",
              day = timeofday == "day",
              sunset = timeofday == "sunset",
+             nauticaldusk = timeofday == "nauticaldusk",
              night = timeofday == "night",
-             open_closed = open_close / max(open_closed))
+             open_closed = open_close / max(open_closed),
+             is_pointcount = (type == "pc"))
     
     obj_null = try(fit_jqpadmix(all_rtmb_ready, return_data = TRUE, inits = INITS, profile_improve_stop = 1, return_hess = TRUE, return_ci = TRUE))
     obj = try(fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1, return_hess = TRUE, return_ci = TRUE))

@@ -27,7 +27,7 @@ source("WTlogin.R")
 wt_auth()
 
 #4. Set the WT version ----
-v.wt <- "2026-06-02"
+v.wt <- "2026-07-10"
 
 #5. Get the downloaded data object ----
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
@@ -92,6 +92,9 @@ aru.good = aru %>%
   dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
   # estimate counts in the event of "too many to track" detections
   wt_replace_tmtt() %>%
+  # remove sightings that are outside the breeding window (Jun 1 - Jul 15) or have missing timestamp information (often shows up as being recorded at midnight)
+  dplyr::filter(yday(recording_date_time) %in% seq(152, 196),
+                !(hour(recording_date_time) == 0 & minute(recording_date_time) == 0)) %>%
   # remove any non-numeric values for individual_count
   dplyr::filter(individual_count > 0) %>%
   # remove erroneous noise
@@ -143,6 +146,10 @@ pc.good = pc %>%
   # remove non-birds
   wt_tidy_species(remove=c("abiotic", "insect", "human")) %>%
   dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
+  # remove sightings that are outside the breeding window (Jun 1 - Jul 15) or have missing timestamp information (often shows up as being recorded at midnight)
+  dplyr::filter(yday(survey_date) %in% seq(152, 196),
+                # there are a suspiciously high # of surveys at 12:01 also... removing those! (this is only an issue for point counts)
+                !(hour(survey_date) == 0 & minute(survey_date) < 2)) %>%
   # remove tasks labeled as bad by the "bad_tasks" dataframe
   left_join(bad_tasks, by = join_by(survey_id == task_id, project_id == project_id, location == location, survey_date == recording_date_time)) %>%
   mutate(Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite)) %>%
