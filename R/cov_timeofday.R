@@ -45,22 +45,30 @@ cov_timeofday = function(cov_name,
 
 # Get discrete time of day classification
 #
+# t_since_nauticaldawn: numeric; # of hours after beginning of morning nautical twilight
 # t_since_dawn: numeric; # of hours after beginning of morning civil twilight
 # t_since_sunrise: numeric; # of hours after sunrise
 # t_since_goldenend: numeric; # of hours after the end of morning golden hour
 # t_since_golden: numeric; # of hours after beginning of evening golden hour
 # t_since_dusk: numeric; # of hours after beginning of evening nautical twilight
+# t_since_nauticaldusk: numeric; # of hours after end of evening nautical twilight
 # t_since_nadir: numeric; # of hours after the darkest moment of the night / day
 #
 # Returns a character vector of values
-get_tod = function(t_since_dawn, 
+get_tod = function(t_since_nauticaldawn,
+                   t_since_dawn, 
                    t_since_sunrise, 
                    t_since_goldenend, 
                    t_since_golden, 
                    t_since_dusk, 
+                   t_since_nauticaldusk,
                    t_since_nadir) {
   
   case_when(
+    # 0.1. nautical dawn when both are in the same day
+    !is.na(t_since_nauticaldawn) & !is.na(t_since_dawn) & t_since_nauticaldawn >= 0 & t_since_dawn <= 0 & t_since_nauticaldawn > t_since_dawn ~ "nauticaldawn",
+    # 0.2. nautical dawn when nautical dawn is before 12 AM and civil dawn is after 12 AM
+    !is.na(t_since_nauticaldawn) & !is.na(t_since_dawn) & (t_since_nauticaldawn >= 0 | t_since_dawn <= 0) & t_since_nauticaldawn < t_since_dawn ~ "nauticaldawn",
     # 1. sunrise window: within golden hour
     !is.na(t_since_dawn) & t_since_dawn >= 0 & t_since_goldenend <= 0 ~ "sunrise",
     # 2. sunrise window: when there is no dawn anything from nadir to end of goldenhour
@@ -68,9 +76,13 @@ get_tod = function(t_since_dawn,
     # 3. sunrise window: when there is no sunrise and then time is during golden hours after nadir
     is.na(t_since_sunrise) & t_since_nadir >= 0 & t_since_goldenend <= 0 ~ "sunrise",
     # 4. dawn: between goldenhour and +5h after sunrise
-    !is.na(t_since_sunrise) & t_since_goldenend > 0 & t_since_sunrise <= 5 ~ "dawn",
+    !is.na(t_since_sunrise) & t_since_goldenend > 0 & t_since_sunrise <= 5 ~ "morning",
     # 5. dawn: define dawn when there is no sunrise
-    is.na(t_since_dawn) & is.na(t_since_sunrise) & t_since_nadir >= 0 & t_since_nadir <= 5 ~ "dawn",
+    is.na(t_since_dawn) & is.na(t_since_sunrise) & t_since_nadir >= 0 & t_since_nadir <= 5 ~ "morning",
+    # 5.1. nautical dusk when both of these are in the same day
+    !is.na(t_since_nauticaldusk) & !is.na(t_since_dusk) & t_since_nauticaldusk <= 0 & t_since_dusk >= 0 & t_since_nauticaldusk < t_since_dusk ~ "nauticaldusk",
+    # 5.2. nautical dusk when these are not in the same day (i.e., nautical dusk is after 12 AM)
+    !is.na(t_since_nauticaldusk) & !is.na(t_since_dusk) & (t_since_nauticaldusk <= 0 | t_since_dusk >= 0) & t_since_nauticaldusk > t_since_dusk ~ "nauticaldusk",
     # 6. sunset window: between evening goldenhour and dusk when dusk is before midnight
     !is.na(t_since_dusk) & t_since_golden > t_since_dusk & t_since_golden >= 0 & t_since_dusk <= 0 ~ "sunset",
     # 7. sunset window: between evening goldenhour and dusk when dusk is after midnight

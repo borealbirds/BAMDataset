@@ -232,7 +232,7 @@ tmbprofile_slice_manual = function(obj,
   
   I_PAR = diag(length(obj$par))
   if (!is.null(obj$env$random)) par_in = par_in[-obj$env$random]
-
+  
   foreach(i = par_ind, .errorhandling = "pass") %doint% {
     
     if (verbose > 0) message("Starting slice for pars[", i, "] = ", names(obj$par[i]))
@@ -264,7 +264,7 @@ tmbprofile_slice_manual = function(obj,
       
       new_fn(fit$par, pf = pf_i)
     }))
-
+    
   }
 }
 
@@ -274,9 +274,15 @@ profile_to_table = function(out) {
     # For each parameter
     this_df = out[[ind]]
     
-    this_df_lo = this_df[this_df$side == "lower", ]
-    this_df_hi = this_df[this_df$side == "upper", ]
+    out = tryCatch({
+      this_df_lo = this_df[this_df$side == "lower", ]
+      this_df_hi = this_df[this_df$side == "upper", ]
+      
+      data.frame(par_name = rownames(this_df)[1], est = this_df$pf_i[1], CL = this_df_lo$pf_i[nrow(this_df_lo)], CU = this_df_hi$pf_i[nrow(this_df_hi)])
+    }, error = function(e) {
+      data.frame(par_name = "NA_FAILED", est = NaN, CL = NaN, CU = NaN)
+    })
     
-    data.frame(par_name = rownames(this_df)[1], est = this_df$pf_i[1], CL = this_df_lo$pf_i[nrow(this_df_lo)], CU = this_df_hi$pf_i[nrow(this_df_hi)])
+    out
   }))
 }
