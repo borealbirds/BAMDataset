@@ -16,6 +16,8 @@
 library(tidyverse) #basic data wrangling
 library(wildrtrax) #to tidy data from wildtrax
 library(readxl)
+library(terra)
+library(sf)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
@@ -33,6 +35,7 @@ v.wt <- "2026-07-10"
 load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
 
 bad_tasks = read_xlsx(file.path(root, "Dataset Assessment", "Exclusion", "Retenu_visite.xlsx"))
+bad_aru_projects = read_csv(file.path(root, "Dataset Assessment", "Exclusion", "aru_bad_timestamps_prt_20260716.csv"))
 
 # HELPER FUNCTIONS ########
 
@@ -85,6 +88,9 @@ aru <- do.call(rbind, aru.wt)
 #           - remove anything with more than 99.9% quantile of count for point count data for that species (or 10 if that quantile is smaller than 10)
 MAX_ARU_TIME = 15 * 60
 BEGIN_DATE = "1901-01-01"
+PERC_TOD_THRESHOLD = 0.01 # we remove any ARU counts that come from a time of day that represents less than this percentage of possible time of day bins
+
+timeofday_cov = cov_tod_bin("timeofday")
 
 aru.good = aru %>%
   # remove non-birds
@@ -99,10 +105,10 @@ aru.good = aru %>%
   dplyr::filter(individual_count > 0) %>%
   # remove erroneous noise
   dplyr::filter(max_noise_volume!="Extreme" | is.na(max_noise_volume), !max_noise_type %in% c("ARU Malfunction") | is.na(max_noise_type)) %>%
-  # remove tasks labeled as bad by the "bad_tasks" dataframe
+  # remove tasks labeled as bad by the "bad_tasks" dataframes
   left_join(bad_tasks, by = join_by(task_id == task_id, project_id == project_id, location == location, recording_date_time == recording_date_time)) %>%
   mutate(Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite)) %>%
-  dplyr::filter(Retenu_Visite == "oui") %>%
+  dplyr::filter(Retenu_Visite == "oui", !(project_id %in% bad_aru_projects$project_id)) %>%
   # remove anything with buffered locations or for which the task has not been completed yet
   dplyr::filter(is.na(location_buffer_m) | location_buffer_m == 0, task_is_complete %in% c("TRUE", "t")) %>%
   remove_bad_dates(col = "recording_date_time", begin_date = BEGIN_DATE, end_date = v.wt) %>%
@@ -117,7 +123,17 @@ aru.good = aru %>%
   dplyr::filter(detection_time == min(detection_time)) %>%
   ungroup %>%
   # rename task ID's so they don't overlap with point counts
-  mutate(task_id = paste0("ARU_", task_id))
+  mutate(task_id = paste0("ARU_", task_id)) %>%
+  # remove "outlier" counts that take place at the wrong time of day. this involves calculating time of day which is a bit tedious but doable
+  mutate(timeofday = timeofday_cov$get(longitude, latitude, recording_date_time)) %>%
+  group_by(project_id, timeofday) %>%
+  mutate(n_tod = n()) %>%
+  ungroup %>%
+  group_by(project_id) %>%
+  mutate(n_proj = n()) %>%
+  ungroup %>%
+  mutate(p_tod = n_tod / n_proj) %>%
+  dplyr::filter(p_tod >= PERC_TOD_THRESHOLD)
 
 #3. Tidy and format ----
 #we have to filter to the first detection for each "individual_order" because some individuals have multiple tags

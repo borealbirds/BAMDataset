@@ -42,7 +42,7 @@ aru_final = aru.good %>%
          count = individual_count,
          r_mxs = r_max,
          type = "aru") %>%
-  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, longitude, latitude, date = recording_date_time, type)
+  dplyr::select(project_id, survey_id = task_id, species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count, r_mxs, longitude, latitude, date = recording_date_time, type)
 
 pc_final = pc.good.final %>%
   dplyr::filter(!is.na(individual_count)) %>%
@@ -78,7 +78,7 @@ pc_final = pc.good.final %>%
          t_up = as.numeric(str_split_i(detection_time, "(-|[a-z])+", -2))) %>% 
   # remove sightings without any duration bins
   dplyr::filter(n_distance_bins > 1 | n_duration_bins > 1) %>%
-  dplyr::select(species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count, longitude, latitude, date = survey_date) %>%
+  dplyr::select(project_id, survey_id, species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, count = individual_count, longitude, latitude, date = survey_date) %>%
   mutate(r_lo = r_lo * R_SCALE,
          r_up = r_up * R_SCALE,
          r_mxs = r_max * R_SCALE,
@@ -95,25 +95,11 @@ rm(pc.good.final, wt.wide, aru.good, pc_final, aru_final)
 gc()
 
 # Extract covariates ----
-closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path("data", "scanfi_biomass_agg"), method = "nearest")
-t_since_sunrise_cov = cov_timeofday(cov_name = "t_since_sunrise", type = "sunrise")
-t_since_goldenend_cov = cov_timeofday(cov_name = "t_since_goldenend", type = "goldenHourEnd")
-t_since_dawn_cov = cov_timeofday(cov_name = "t_since_dawn", type = "dawn")
-t_since_golden_cov = cov_timeofday(cov_name = "t_since_golden", type = "goldenHour")
-t_since_nadir_cov = cov_timeofday(cov_name = "t_since_nadir", type = "nadir")
-t_since_dusk_cov = cov_timeofday(cov_name = "t_since_dusk", type = "dusk")
-t_since_ndusk_cov = cov_timeofday(cov_name = "t_since_nauticaldusk", type = "nauticalDusk")
-t_since_ndawk_cov = cov_timeofday(cov_name = "t_since_nauticaldawn", type = "nauticalDawn")
+timeofday_cov = cov_tod_bin("timeofday")
+all_final = all_final %>% mutate(timeofday = timeofday_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 
+closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path("data", "scanfi_biomass_agg"), method = "nearest")
 all_final$open_closed = with(all_final, closed_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_sunrise = with(all_final, t_since_sunrise_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_goldenend = with(all_final, t_since_goldenend_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_dawn = with(all_final, t_since_dawn_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_golden = with(all_final, t_since_golden_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_nadir = with(all_final, t_since_nadir_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_dusk = with(all_final, t_since_dusk_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_nauticaldusk = with(all_final, t_since_ndusk_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
-all_final$t_since_nauticaldawn = with(all_final, t_since_ndawk_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 
 # Set up parallelization
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
@@ -131,7 +117,6 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
     
     all_rtmb_ready = all_final %>%
       dplyr::filter(species_code == sp) %>% 
-      mutate(timeofday = get_tod(t_since_nauticaldawn, t_since_dawn, t_since_sunrise, t_since_goldenend, t_since_golden, t_since_dusk, t_since_nauticaldusk, t_since_nadir)) %>%
       group_by(timeofday) %>%
       mutate(n_this_tod = n()) %>%
       ungroup %>%

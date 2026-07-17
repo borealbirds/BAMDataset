@@ -1,3 +1,49 @@
+# Covariate generating function for timeofday bins
+#
+# cov_name: character representing the desired name of the covariate
+#
+# Returns a covariate generating function
+cov_tod_bin = function(cov_name) {
+  
+  diff_fun = function(t1, t2) as.numeric(difftime(t1, t2, units = "hours"))
+  
+  gfun = function(x, y, t, crs_in = add_EPSG(4326)) {
+    
+    # convert to degrees
+    xy_proj = st_as_sf(data.frame(x = x, y = y), coords = c("x", "y"), crs = crs_in) %>%
+      st_transform("EPSG:4326")
+    xy_proj_crds = st_coordinates(xy_proj)
+    
+    # get time zone associated with each time (we assume the times are in local time but need a time zone)
+    tz_vals = lutz::tz_lookup(xy_proj, warn = FALSE, method = "accurate")
+    dates_forced = force_tzs(t, tz_vals)
+    
+    solar_data = data.frame(date = as.Date(t),
+                            lat = xy_proj_crds[, 2],
+                            lon = xy_proj_crds[, 1])
+  
+    sun_times = suncalc::getSunlightTimes(data = solar_data) %>%
+      mutate(t = dates_forced,
+             t_since_sunrise = diff_fun(t, sunrise),
+             t_since_goldenend = diff_fun(t, goldenHourEnd),
+             t_since_dawn = diff_fun(t, dawn),
+             t_since_golden = diff_fun(t, goldenHour),
+             t_since_nadir = diff_fun(t, nadir),
+             t_since_dusk = diff_fun(t, dusk),
+             t_since_nauticaldusk = diff_fun(t, nauticalDusk),
+             t_since_nauticaldawn = diff_fun(t, nauticalDawn),
+             timeofday = get_tod(t_since_nauticaldawn, t_since_dawn, t_since_sunrise, t_since_goldenend, t_since_golden, t_since_dusk, t_since_nauticaldusk, t_since_nadir))
+    
+    sun_times$timeofday
+    
+  }
+  
+  list(name = cov_name,
+       domain = make_infinite_polygon(),
+       get = gfun)
+  
+}
+
 # Covariate generating function for covariates based on sun position
 #
 # cov_name: character representing the desired name of the covariate
@@ -8,11 +54,6 @@
 cov_timeofday = function(cov_name,
                          type = c("sunrise", "solarNoon", "nadir", "sunset", "sunriseEnd", "sunsetStart", "dawn", "dusk", "nauticalDawn", "nauticalDusk", "nightEnd", "night", "goldenHourEnd", "goldenHour"),
                          units = c("hours", "secs", "mins", "days", "weeks")) {
-  
-  library(suncalc)
-  library(terra)
-  library(lutz)
-  library(sf)
   
   type = match.arg(type)
   units = match.arg(units)
@@ -25,14 +66,14 @@ cov_timeofday = function(cov_name,
     xy_proj_crds = st_coordinates(xy_proj)
     
     # get time zone associated with each time (we assume the times are in local time but need a time zone)
-    tz_vals = tz_lookup(xy_proj, warn = FALSE)
+    tz_vals = lutz::tz_lookup(xy_proj, warn = FALSE, method = "accurate")
     dates_forced = force_tzs(t, tz_vals)
     
     solar_data = data.frame(date = as.Date(t),
                             lat = xy_proj_crds[, 2],
                             lon = xy_proj_crds[, 1])
     
-    sun_times = getSunlightTimes(data = solar_data, keep = type)[, 4]
+    sun_times = suncalc::getSunlightTimes(data = solar_data, keep = type)[, 4]
     as.numeric(difftime(dates_forced, sun_times, units = units))
     
   }
