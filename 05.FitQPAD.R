@@ -24,10 +24,13 @@ INITS = c(0, 1)
 MIN_TOD_OBS = 5 # minimum # of observations for a given time of day for the models to work; if there are fewer than 5 observations for a given time of day category, those will be removed
 
 all_species = unique(pc.good.final$species_code)
-# all_species = c("WOTH", "GCTH")
+# all_species = c("CONW")
 if (!is.na(commandArgs()[6])) all_species = str_split_1(commandArgs()[6], " ")
 
-lambda_covs_formula = ~ 0 + morning + sunrise + day + sunset + night + nauticaldawn + nauticaldusk + is_pointcount
+message("length(commandArgs()) = ", length(commandArgs()))
+print(commandArgs())
+
+lambda_covs_formula = ~ 0 + morning + sunrise + day + sunset + night + nauticaldawn + nauticaldusk + is_pointcount + timeofyear
 alpha_covs_formula = ~ open_closed
 
 # Prepare PC and ARU data for RTMB models - do it now so it's a bit faster ----
@@ -129,6 +132,7 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
              nauticaldusk = timeofday == "nauticaldusk",
              night = timeofday == "night",
              open_closed = open_closed / max(open_closed),
+             timeofyear = yday(date) - 152,
              is_pointcount = (type == "pc"))
     
     obj = try(fit_jqpadmix(all_rtmb_ready, formula_alpha = alpha_covs_formula, formula_lambda = lambda_covs_formula, return_data = TRUE, inits = INITS, profile_improve_stop = 1, return_hess = TRUE, return_ci = TRUE))

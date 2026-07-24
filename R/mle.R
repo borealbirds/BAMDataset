@@ -74,7 +74,7 @@ mle = function(obj,
     
     # convert to table and replace the "est" column with the actual MLE in case they differ
     pr_table = profile_to_table(pr)
-    pr_table$est = obj$env$last.par.best
+    pr_table$est = as.numeric(obj$env$last.par.best)
     
     out = list(fit = out, ci_table = pr_table)
     
