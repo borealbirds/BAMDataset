@@ -92,23 +92,24 @@ all_final = rbind(pc_final, aru_final) %>%
   group_by(species_code) %>%
   mutate(n_this_sp = n()) %>%
   ungroup %>%
-  arrange(-n_this_sp, species_code)
+  arrange(-n_this_sp, species_code) %>%
+  dplyr::select(-n_this_sp)
 
 rm(pc.good.final, aru.good, pc_final, aru_final)
 gc()
 
 # Extract covariates ----
 timeofday_cov = cov_tod_bin("timeofday")
-
 closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path("data", "scanfi_biomass_agg"), method = "nearest")
+# closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path("~/School/BAM/QPAD_PRT/data", "scanfi_biomass_agg"), method = "nearest")
 
 all_final = all_final %>%
   mutate(timeofday = timeofday_cov$get(longitude, latitude, date, crs_in = DEG_CRS),
          open_closed = closed_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
 
 wt.wide = wt.wide %>%
-  mutate(timeofday = timeofday_cov$get(longitude, latitude, date, crs_in = DEG_CRS),
-         open_closed = closed_cov$get(longitude, latitude, date, crs_in = DEG_CRS))
+  mutate(timeofday = timeofday_cov$get(longitude, latitude, date_time, crs_in = DEG_CRS),
+         open_closed = closed_cov$get(longitude, latitude, date_time, crs_in = DEG_CRS))
 
 # Set up parallelization
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
@@ -142,8 +143,7 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
   rounded_duration_info = this_detections %>%
     group_by(lon_rounded, lat_rounded, year) %>%
     dplyr::filter(count_total == max_count) %>%
-    summarize(t_mxm = min(t_max),
-              best_survey_id = survey_id[which.min(t_max)])
+    summarize(t_mxm = min(t_max))
   
   this_detections = this_detections %>%
     left_join(rounded_duration_info, by = join_by(lon_rounded == lon_rounded, lat_rounded == lat_rounded, year == year))
@@ -180,14 +180,24 @@ qpad_fits = foreach(sp = all_species, .errorhandling = "stop") %dopar% {
            count_total = 0,
            r_mxs = distance,
            type = ifelse(method == "PC", "pc", "aru"),
-           equipment_model = NA) %>%
-    dplyr::select(obs_id, survey_id, best_survey_id, project_id, r_lo, r_up, r_max, t_lo, t_up, t_max, t_mxm, count, r_mxs, longitude, latitude, date = date_time, type, task_method = method, equipment_model, count_total, lon_rounded, lat_rounded, year, max_count)
+           equipment_model = NA,
+           species_code = sp) %>%
+    dplyr::select(survey_id, project_id, species_code, r_lo, r_up, r_max, t_lo, t_up, t_max, t_mxm, count, r_mxs, longitude, latitude, date = date_time, lon_rounded, lat_rounded, year, type, count_total, max_count, timeofday, open_closed)
+  
+  # debugging stuff
+  message("ncol(this_detections) = ", ncol(this_detections), " and ncol(all_rtmb_rc) = ", ncol(all_rtmb_rc))
+  message("names(this_detections) = [", paste0(names(this_detections), collapse = ", "), "]")
+  message("names(all_rtmb_rc) = [", paste0(names(all_rtmb_rc), collapse = ", "), "]")
   
   all_rtmb_ready = rbind(this_detections, all_rtmb_rc) %>%
     group_by(timeofday) %>%
     mutate(n_this_tod = sum(pmin(count, 1))) %>%
     ungroup %>%
     dplyr::filter(n_this_tod >= MIN_TOD_OBS) %>%
+    group_by(lon_rounded, lat_rounded, year) %>%
+    mutate(best_survey_index = which.max(count_total),
+           best_survey_id = survey_id[best_survey_index]) %>%
+    ungroup %>%
     mutate(nauticaldawn = timeofday == "nauticaldawn",
            sunrise = timeofday == "sunrise",
            morning = timeofday == "morning",
