@@ -27,7 +27,7 @@ library(auk) #eBird wrangling
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Set the eBird version ----
-v.ebd <- "Jan-2026"
+v.ebd <- "Jun-2026"
 
 #FILTER DATA###############
 
@@ -35,7 +35,7 @@ v.ebd <- "Jan-2026"
 auk_set_ebd_path(file.path(root, "eBird", v.ebd, paste0("ebd_CA_smp_rel", v.ebd)), overwrite=TRUE)
 
 #2. Define filters----
-filters <- auk_ebd(file="ebd_CA_relJan-2026.txt") |>
+filters <- auk_ebd(file = paste0("ebd_CA_rel", v.ebd, ".txt")) |>
   auk_protocol("Stationary") |>
   auk_duration(c(1, 10)) |>
   auk_complete() 
