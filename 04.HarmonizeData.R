@@ -23,7 +23,7 @@ root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 v.wt <- "2026-07-10"
 
 #4. Set the eBird version ----
-v.ebd <- "Jan-2026"
+v.ebd <- "Jun-2026"
 
 #5. Get the data ----
 load(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
