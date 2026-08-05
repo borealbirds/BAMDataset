@@ -346,16 +346,21 @@ wt.wide <- wt.use |>
 
 #4. Save ----
 save(wt.wide, aru.good, pc.good.final, file = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
+
+# # Timing: write wt.wide to .RData versus RDS versus parquet
+# time_write_rdata = system.time(save(wt.wide, file = file.path(root, "WildTrax", v.wt, "test.RData")))
+# time_write_rds = system.time(saveRDS(wt.wide, file.path(root, "WildTrax", v.wt, "test.rds")))
+# time_write_parquet = system.time(arrow::write_dataset(wt.wide, file.path(root, "WildTrax", v.wt), format = "parquet", basename_template = "wt_wide_{i}.parquet"))
 # 
-# wt_wide_sp = st_as_sf(wt.wide,
-#                       coords = c("longitude", "latitude"),
-#                       crs = 4326)
-# ddbs_write_dataset(wt_wide_sp, path = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".parquet")))
-# ddbs_write_dataset(wt_wide_sp, path = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".parquet")))
-# st_write_parquet(wt_wide_sp, dsn = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".parquet")))
-# 
-# wt_wide_lazy_pq = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".parquet")), crs = "EPSG:4326")
-# 
-# arrow::write_dataset(wt.wide, file.path(root, "WildTrax", v.wt), format = "parquet", basename_template = "wt_wide_{i}.parquet")
-# 
-# lazy_ds = arrow::open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0.parquet"))
+# time_read_rdata = system.time({
+#   load(file.path(root, "WildTrax", v.wt, "test.RData"))
+#   wt.wide %>% dplyr::filter(CONW > 0)
+# })
+# time_read_rds = system.time({
+#   dat = readRDS(file.path(root, "WildTrax", v.wt, "test.rds"))
+#   dat %>% dplyr::filter(CONW > 0)
+# })
+# time_read_parquet = system.time({
+#   lazy_con = arrow::open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# })
