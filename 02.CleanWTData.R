@@ -177,7 +177,8 @@ MIN_PC_COUNT_CUTOFF = 10
 pc.good = pc %>%
   # remove non-birds
   wt_tidy_species(remove=c("abiotic", "insect", "human")) %>%
-  dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
+  # remove surveys with no species or duration info (no distance info is OK, we just assume all birds were counted regardless of distance)
+  dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code), survey_duration_method != "UNKNOWN") %>%
   # flag sightings that are outside the breeding window (Jun 1 - Jul 15)
   mutate(flag_doy = yday(survey_date) %notin% seq(152, 196),
          # flag sightings that have missing timestamp information (often shows up as being recorded at midnight)
@@ -347,20 +348,48 @@ wt.wide <- wt.use |>
 #4. Save ----
 save(wt.wide, aru.good, pc.good.final, file = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
 
-# # Timing: write wt.wide to .RData versus RDS versus parquet
+# wt_wide_sp = st_as_sf(as.data.frame(wt.wide), crs = 4326, coords = c("longitude", "latitude"))
+# 
+# # # Timing: write wt.wide to .RData versus RDS versus parquet
 # time_write_rdata = system.time(save(wt.wide, file = file.path(root, "WildTrax", v.wt, "test.RData")))
-# time_write_rds = system.time(saveRDS(wt.wide, file.path(root, "WildTrax", v.wt, "test.rds")))
 # time_write_parquet = system.time(arrow::write_dataset(wt.wide, file.path(root, "WildTrax", v.wt), format = "parquet", basename_template = "wt_wide_{i}.parquet"))
+# time_write_parquet_ddb = system.time(ddbs_write_dataset(wt_wide_sp, file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb.parquet"), overwrite = TRUE))
+# time_write_parquet_ddb_zstd = system.time(ddbs_write_dataset(wt_wide_sp, file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_zstd.parquet"), overwrite = TRUE, options = list(compression = "zstd")))
+# time_write_parquet_ddb_gzip = system.time(ddbs_write_dataset(wt_wide_sp, file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_gzip.parquet"), overwrite = TRUE, options = list(compression = "gzip")))
 # 
 # time_read_rdata = system.time({
 #   load(file.path(root, "WildTrax", v.wt, "test.RData"))
 #   wt.wide %>% dplyr::filter(CONW > 0)
 # })
-# time_read_rds = system.time({
-#   dat = readRDS(file.path(root, "WildTrax", v.wt, "test.rds"))
-#   dat %>% dplyr::filter(CONW > 0)
-# })
 # time_read_parquet = system.time({
 #   lazy_con = arrow::open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0.parquet"))
 #   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
 # })
+# time_read_parquet_ddb = system.time({
+#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# })
+# time_read_parquet_ddb_zstd = system.time({
+#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_zstd.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# })
+# time_read_parquet_ddb_gzip = system.time({
+#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_gzip.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# })
+# 
+# # for more samples
+# library(microbenchmark)
+# 
+# mb_parquet_read = microbenchmark(list = list(default = {
+#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# }, 
+# zstd = {
+#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_zstd.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# }, 
+# gzip = {
+#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_gzip.parquet"))
+#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
+# }), times = 10) 
