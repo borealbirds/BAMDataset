@@ -105,6 +105,7 @@ all_wide_no_dups = all.wide %>%
          time_rounded = round_date(date_time, TIME_ROUND),
          method_sort = as.integer(factor(method, levels = c("PC", "1SPT", "1SPM", "1SPM Audio/Visual hybrid", "eBird")))) %>%
   # sort by priority for keeping based on project
+  # TO DO: Make this flag instead of remove, and prioritize non-duplicates when flagging
   arrange(method_sort, date_time) %>%
   group_by(lat_rounded, lon_rounded, time_rounded) %>%
   mutate(n_dups = n(),
