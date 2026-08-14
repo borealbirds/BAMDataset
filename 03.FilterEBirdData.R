@@ -16,6 +16,8 @@
 
 #eBird data has not been zerofilled because there was no species filtering done and we are assuming that all stationary counts have at least 1 bird observed.
 
+#NOTE the US files are on Elly's local because they are too big for shared drives (> 500 GB)
+
 #PREAMBLE############################
 
 #1. Load packages----
@@ -29,19 +31,126 @@ root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 #3. Set the eBird version ----
 v.ebd <- "Jun-2026"
 
-#FILTER DATA###############
+#FILTER CANADA###############
 
 #1. Set ebd path----
-auk_set_ebd_path(file.path(root, "eBird", v.ebd, paste0("ebd_CA_smp_rel", v.ebd)), overwrite=TRUE)
+auk_set_ebd_path(
+  file.path(root, "eBird", v.ebd, paste0("ebd_CA_smp_rel", v.ebd)),
+  overwrite = TRUE
+)
 
 #2. Define filters----
-filters <- auk_ebd(file = paste0("ebd_CA_rel", v.ebd, ".txt")) |>
+filters <- auk_ebd(file = "ebd_CA_relJun-2026.txt") |>
   auk_protocol("Stationary") |>
   auk_duration(c(1, 10)) |>
-  auk_complete() 
+  auk_complete()
 
 #3. Filter data----
 #select columns to keep
-filtered <- auk_filter(filters, file=file.path(root, "eBird", v.ebd, paste0("03_ebd_filtered_", v.ebd, ".txt")), overwrite=TRUE,
-                       keep = c("group identifier", "sampling_event_identifier", "scientific name", "common_name", "observation_count", "latitude", "longitude", "locality_type", "observation_date", "time_observations_started", "observer_id", "duration_minutes"))
+filtered_ca <- auk_filter(
+  filters,
+  file = file.path(
+    root,
+    "eBird",
+    v.ebd,
+    paste0("03_ebd_filtered_Canada_", v.ebd, ".txt")
+  ),
+  overwrite = TRUE,
+  keep = c(
+    "group identifier",
+    "sampling_event_identifier",
+    "scientific name",
+    "common_name",
+    "observation_count",
+    "latitude",
+    "longitude",
+    "locality_type",
+    "observation_date",
+    "time_observations_started",
+    "observer_id",
+    "duration_minutes"
+  )
+)
 
+#FILTER MEXICO###############
+
+#1. Set ebd path----
+auk_set_ebd_path(
+  file.path(root, "eBird", v.ebd, paste0("ebd_MX_smp_rel", v.ebd)),
+  overwrite = TRUE
+)
+
+#2. Define filters----
+filters <- auk_ebd(file = "ebd_MX_smp_relJun-2026.txt") |>
+  auk_protocol("Stationary") |>
+  auk_duration(c(1, 10)) |>
+  auk_complete()
+
+#3. Filter data----
+#select columns to keep
+filtered_mx <- auk_filter(
+  filters,
+  file = file.path(
+    root,
+    "eBird",
+    v.ebd,
+    paste0("03_ebd_filtered_Mexico_", v.ebd, ".txt")
+  ),
+  overwrite = TRUE,
+  keep = c(
+    "group identifier",
+    "sampling_event_identifier",
+    "scientific name",
+    "common_name",
+    "observation_count",
+    "latitude",
+    "longitude",
+    "locality_type",
+    "observation_date",
+    "time_observations_started",
+    "observer_id",
+    "duration_minutes"
+  )
+)
+
+#FILTER USA###############
+
+#1. Set ebd path----
+auk_set_ebd_path(
+  file.path(root, "eBird", v.ebd, paste0("ebd_US_smp_rel", v.ebd)),
+  overwrite = TRUE
+)
+
+#2. Define filters----
+filters <- auk_ebd(file = "ebd_US_relJun-2026.txt") |>
+  auk_protocol("Stationary") |>
+  auk_duration(c(1, 10)) |>
+  auk_complete() |>
+  auk_date(c("1985-01-01", "2100-12-31")) #filter to only include data from 1985 to 2026 because it's huge
+
+#3. Filter data----
+#select columns to keep
+filtered_us <- auk_filter(
+  filters,
+  file = file.path(
+    root,
+    "eBird",
+    v.ebd,
+    paste0("03_ebd_filtered_USA_", v.ebd, ".txt")
+  ),
+  overwrite = TRUE,
+  keep = c(
+    "group identifier",
+    "sampling_event_identifier",
+    "scientific name",
+    "common_name",
+    "observation_count",
+    "latitude",
+    "longitude",
+    "locality_type",
+    "observation_date",
+    "time_observations_started",
+    "observer_id",
+    "duration_minutes"
+  )
+)
