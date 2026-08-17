@@ -1,20 +1,21 @@
 # ---
-# title: BAM dataset - clean WildTrax data
+# title: BAM dataset - harmonize data
 # author: Elly Knight
-# created: March 2, 2026
+# created: March 4, 2026
 # ---
 
 #NOTES################################
 
-#PURPOSE: This script tidies the WT data downloads into objects that can then be harmonized with eBird data to produce the final dataset.
+#PURPOSE: This script wrangles & combines eBird data with the cleaned WildTrax data. Loading the ebird datasets takes time, be patient.
+#TO DO: Make this flag instead of remove, and prioritize non-duplicates when flagging
 
-#Note that surveys done with acoustic recorders and transcribed to point count and stored in the point count sensor (survey_distance_method=="0m-INF-ARU") are assigned a point count method type because they are legacy data that were likely transcribed through continuous listening without the use of a spectrogram.
-
-#PREAMBLE############################
+# PREAMBLE############################
 
 #1. Load packages----
 library(tidyverse) #basic data wrangling
-library(wildrtrax) #to tidy data from wildtrax
+library(auk) #ebird data read
+library(wildrtrax) #species list
+library(data.table) #binding with missing columns
 library(readxl)
 library(terra)
 library(sf)
@@ -24,62 +25,172 @@ lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
-#3. Login to WildTrax----
+#3. Set the WildTrax version ----
+v.wt <- "2026-07-10"
+
+#4. Set the eBird version ----
+v.ebd <- "Jun-2026"
+
+#5. Login to WildTrax----
 source("WTlogin.R")
 wt_auth()
 
-#4. Set the WT version ----
-v.wt <- "2026-07-10"
-
-#5. Get the downloaded data object ----
-load(file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".Rdata")))
-
-bad_tasks = read_xlsx(file.path(root, "Dataset Assessment", "Exclusion", "Retenu_visite.xlsx"))
-bad_aru_projects = read_csv(file.path(root, "Dataset Assessment", "Exclusion", "aru_bad_timestamps_prt_20260716.csv"))
-
 # HELPER FUNCTIONS ########
 
-remove_bad_dates = function(dat, col = "date_time", begin_date = "1900-01-01", end_date = Sys.time()) {
+remove_bad_dates <- function(
+  dat,
+  col = "date_time",
+  begin_date = "1900-01-01",
+  end_date = Sys.time()
+) {
   dat[dat[, col] >= begin_date & dat[, col] <= end_date, ]
 }
 
-remove_bad_coordinates = function(dat, xcol = "longitude", ycol = "latitude", lon_keep = c(-180, 180), lat_keep = c(-90, 90), lon_flip = c(180, 180), lat_flip = c(90, 90), flag = FALSE) {
-  
-  if (flag && "flag_err_loc" %notin% names(dat)) dat$flag_err_loc = FALSE
-  
-  xcol_values = dat[, xcol, drop = TRUE]
-  ycol_values = dat[, ycol, drop = TRUE]
-  
-  dat = dat[!is.na(xcol_values) & !is.na(ycol_values), ]
-  
-  xcol_values_new = dat[, xcol, drop = TRUE]
-  ycol_values_new = dat[, ycol, drop = TRUE]
-  xcol_flip_bool = (xcol_values_new > lon_flip[1]) & (xcol_values_new < lon_flip[2])
-  ycol_flip_bool = (ycol_values_new > lat_flip[1]) & (ycol_values_new < lat_flip[2])
-  
-  dat[xcol_flip_bool, xcol] = -dat[xcol_flip_bool, xcol]
-  dat[ycol_flip_bool, ycol] = -dat[ycol_flip_bool, ycol]
-  
-  xcol_values_newer = dat[, xcol, drop = TRUE]
-  ycol_values_newer = dat[, ycol, drop = TRUE]
-  lat_lon_diff_values = abs(xcol_values_new) != abs(ycol_values_new)
-  lat_lon_keep_values = (xcol_values_new > lon_keep[1]) & (xcol_values_new < lon_keep[2]) & (ycol_values_new > lat_keep[1]) & (ycol_values_new < lat_keep[2])
-  
+remove_bad_coordinates <- function(
+  dat,
+  xcol = "longitude",
+  ycol = "latitude",
+  lon_keep = c(-180, 180),
+  lat_keep = c(-90, 90),
+  lon_flip = c(180, 180),
+  lat_flip = c(90, 90),
+  flag = FALSE
+) {
+  if (flag && "flag_err_loc" %notin% names(dat)) {
+    dat$flag_err_loc <- FALSE
+  }
+
+  xcol_values <- dat[, xcol, drop = TRUE]
+  ycol_values <- dat[, ycol, drop = TRUE]
+
+  dat <- dat[!is.na(xcol_values) & !is.na(ycol_values), ]
+
+  xcol_values_new <- dat[, xcol, drop = TRUE]
+  ycol_values_new <- dat[, ycol, drop = TRUE]
+  xcol_flip_bool <- (xcol_values_new > lon_flip[1]) &
+    (xcol_values_new < lon_flip[2])
+  ycol_flip_bool <- (ycol_values_new > lat_flip[1]) &
+    (ycol_values_new < lat_flip[2])
+
+  dat[xcol_flip_bool, xcol] <- -dat[xcol_flip_bool, xcol]
+  dat[ycol_flip_bool, ycol] <- -dat[ycol_flip_bool, ycol]
+
+  xcol_values_newer <- dat[, xcol, drop = TRUE]
+  ycol_values_newer <- dat[, ycol, drop = TRUE]
+  lat_lon_diff_values <- abs(xcol_values_new) != abs(ycol_values_new)
+  lat_lon_keep_values <- (xcol_values_new > lon_keep[1]) &
+    (xcol_values_new < lon_keep[2]) &
+    (ycol_values_new > lat_keep[1]) &
+    (ycol_values_new < lat_keep[2])
+
   if (flag) {
-    dat = dat %>% mutate(flag_err_loc = flag_err_loc | !lat_lon_diff_values | !lat_lon_keep_values)
+    dat <- dat %>%
+      mutate(
+        flag_err_loc = flag_err_loc |
+          !lat_lon_diff_values |
+          !lat_lon_keep_values
+      )
     return(dat)
   }
-  
+
   dat[lat_lon_diff_values & lat_lon_keep_values, ]
 }
 
-#TIDY ARU DATA###########
+wt_replace_tmtt <- function(data, calc = "round") {
+  if (!"recording_date_time" %in% colnames(data)) {
+    stop(
+      "The `wt_replace_tmtt` function only works on data from the ARU sensor"
+    )
+  }
+  check_none <- pull(distinct(select(data, species_code)))
+  if (length(check_none) == 1 && check_none == "NONE") {
+    stop("There are no species in this project")
+  }
+  .tmtt <- readRDS(system.file(
+    "extdata",
+    "tmtt_predictions.rds",
+    package = "wildrtrax"
+  ))
+  dat.tmtt <- mutate(data, id = row_number())
+  dat.tmt <- filter(dat.tmtt, abundance %in% c("TMTT", "TNPE"))
+  if (nrow(dat.tmt) > 0) {
+    dat.tmt <- select(
+      mutate(
+        inner_join(
+          mutate(
+            dat.tmt,
+            species_code = ifelse(
+              species_code %in% .tmtt$species_code,
+              species_code,
+              "species"
+            ),
+            observer_id = as.integer(ifelse(
+              observer_id %in%
+                .tmtt$observer_id,
+              observer_id,
+              0
+            ))
+          ),
+          select(.tmtt, species_code, observer_id, pred),
+          by = c("species_code", "observer_id")
+        ),
+        abundance = case_when(
+          calc == "round" ~ round(pred),
+          calc == "ceiling" ~ ceiling(pred),
+          calc == "floor" ~ floor(pred),
+          TRUE ~ NA_real_
+        )
+      ),
+      -pred
+    )
+  }
+  dat.tmtt <- suppressWarnings(select(
+    rows_update(
+      mutate(
+        dat.tmtt,
+        abundance = case_when(
+          abundance %in% c("TMTT", "TNPE") ~ NA_real_,
+          TRUE ~ as.numeric(abundance)
+        )
+      ),
+      dat.tmt,
+      by = c("id")
+    ),
+    -id
+  ))
+  return(dat.tmtt)
+}
 
-#1. Collapse to single dataframe ----
+# WILDTRAX DATA WRANGLING #################
+
+#1. Get the downloaded data object ----
+load(file.path(
+  root,
+  "WildTrax",
+  v.wt,
+  paste0("01_wildtrax_raw_", v.wt, ".Rdata")
+))
+
+bad_tasks <- read_xlsx(file.path(
+  root,
+  "Dataset Assessment",
+  "Exclusion",
+  "Retenu_visite.xlsx"
+))
+bad_aru_projects <- read_csv(file.path(
+  root,
+  "Dataset Assessment",
+  "Exclusion",
+  "aru_bad_timestamps_prt_20260716.csv"
+))
+
+#2. Collapse to single dataframe ----
 aru <- do.call(rbind, aru.wt)
+pc <- do.call(rbind, pc.wt)
 
-#2. Remove erroneous observations ----
-# Locations: 
+#3. Tidy ARU data ----
+#we have to filter to the first detection for each "individual_order" because some individuals have multiple tags
+# Locations:
 #           - some latitudes are positive when they should be negative -> swap those EXCEPT a few point counts from the Aleutians which should stay the same! AND there are some large negative longitudes (around the same area) that should be flipped! But not always reliable here so for now going to just leave out all large western longitudes. Suggest 171 W as a boundary and can look into it more later. Filter accordingly
 #           - some longitudes are just the negative versions of the latitudes -> remove these (more generally remove when abs(lon) == abs(lat))
 #           - remove anything with a location buffer (mostly ARU data) - these are incorrect locations
@@ -93,303 +204,729 @@ aru <- do.call(rbind, aru.wt)
 #           - remove anything where "task_is_complete" is not TRUE (only for ARU)
 #           - remove any ARU detections after 10 minutes (and shorten survey duration to 10 minutes)
 #           - remove duplicate instances of tag_id (for ARU) or survey_id-detection_distance-detection_time-species_code combinations (for PC)
-#           - remove anything with more than 99.9% quantile of count for point count data for that species (or 10 if that quantile is smaller than 10)
-MAX_ARU_TIME = 15 * 60
-BEGIN_DATE = "1901-01-01"
-PERC_TOD_THRESHOLD = 0.01 # we remove any ARU counts that come from a time of day that represents less than this percentage of possible time of day bins
+#           - flag counts above a sample-size-appropriate species quantile, with a minimum count cutoff of 10
+MAX_ARU_TIME <- 10 * 60
+BEGIN_DATE <- "1901-01-01"
+PERC_TOD_THRESHOLD <- 0.01 # we remove any ARU counts that come from a time of day that represents less than this percentage of possible time of day bins
+MIN_COUNT_CUTOFF <- 10
+MIN_Q995_OBSERVATIONS <- 200
+MIN_Q999_OBSERVATIONS <- 1000
 
-timeofday_cov = cov_tod_bin("timeofday")
+timeofday_cov <- cov_tod_bin("timeofday")
 
-aru.good = aru %>%
+aru.tidy <- aru %>%
   # remove non-birds
-  wt_tidy_species(remove=c("abiotic", "insect", "human")) %>%
-  dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code)) %>%
+  wt_tidy_species(remove = c("abiotic", "insect", "human")) %>%
+  dplyr::filter(
+    !(species_code %in% c("NONE")),
+    !is.na(species_code),
+    !is.na(task_duration),
+    # Records explicitly labelled with no survey method are not valid ARU surveys.
+    is.na(task_method) |
+      str_to_upper(str_squish(task_method)) != "NONE"
+  ) %>%
   # estimate counts in the event of "too many to track" detections
-  wt_replace_tmtt() %>%
-  # remove any non-numeric values for individual_count
-  dplyr::filter(individual_count > 0) %>%
-  # flag sightings that are outside the breeding window (Jun 1 - Jul 15)
-  mutate(flag_doy = yday(recording_date_time) %notin% seq(152, 196),
-         # flag sightings that have missing timestamp information (often shows up as being recorded at midnight)
-         flag_err_date = hour(recording_date_time) == 0 & minute(recording_date_time) == 0,
-         # flag sightings with erroneous noise
-         flag_noise = (!is.na(max_noise_volume) & max_noise_volume == "Extreme") | (!is.na(max_noise_type) & max_noise_type == "ARU Malfunction")) %>%
+  wt_replace_tmtt() |>
+  # remove any non-numeric values for abundance
+  dplyr::filter(abundance > 0) |>
+  mutate(
+    # flag sightings that have missing timestamp information (often shows up as being recorded at midnight)
+    flag_err_date = hour(recording_date_time) == 0 &
+      minute(recording_date_time) == 0,
+    # flag sightings with erroneous noise
+    flag_noise = (!is.na(max_noise_volume) & max_noise_volume == "Extreme") |
+      (!is.na(max_noise_type) & max_noise_type == "ARU Malfunction")
+  ) %>%
   # remove tasks labeled as bad by the "bad_tasks" dataframes
-  left_join(bad_tasks, by = join_by(task_id == task_id, project_id == project_id, location == location, recording_date_time == recording_date_time)) %>%
-  mutate(Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite),
-         # flag any tasks that have been manually recommended for removal
-         flag_manual = Retenu_Visite != "oui" | project_id %in% bad_aru_projects$project_id,
-         # flag anything with buffered locations
-         flag_err_loc = !is.na(location_buffer_m) & location_buffer_m > 0,
-         # flag tasks labeled as incomplete
-         flag_task_wt = task_is_complete %notin% c("TRUE", "t"),
-         # more flagging for dates - if year is too early or late
-         flag_err_date = flag_err_date | (recording_date_time < BEGIN_DATE | recording_date_time > v.wt)) %>%
+  left_join(
+    bad_tasks,
+    by = join_by(
+      task_id == task_id,
+      project_id == project_id,
+      location == location,
+      recording_date_time == recording_date_time
+    )
+  ) %>%
+  mutate(
+    Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite),
+    # flag any tasks that have been manually recommended for removal
+    flag_manual = Retenu_Visite != "oui" |
+      project_id %in% bad_aru_projects$project_id,
+    # flag anything with buffered locations
+    flag_err_loc = !is.na(location_buffer_m) & location_buffer_m > 0,
+    # flag tasks labeled as incomplete
+    flag_task_wt = task_is_complete %notin% c("TRUE", "t")
+  ) %>%
   # more flagging for locations - if coordinates make no sense
-  remove_bad_coordinates(lon_keep = c(-171, -52), lat_keep = c(30, 90), lon_flip = c(0, 170), flag = TRUE) %>%
-  # truncate detections to 15 minutes. Not flagging this because we have to actually change the task duration for these
+  remove_bad_coordinates(
+    lon_keep = c(-171, -52),
+    lat_keep = c(30, 90),
+    lon_flip = c(0, 170),
+    flag = TRUE
+  ) %>%
+  # truncate detections and survey duration to 10 minutes
   dplyr::filter(detection_time <= MAX_ARU_TIME) %>%
   mutate(task_duration = pmin(task_duration, MAX_ARU_TIME)) %>%
   # remove duplicate instances of the same tag_id
   distinct(tag_id, .keep_all = TRUE) %>%
   # remove duplicate detections of the same individual by grouping along "individual_order" and selecting the minimum (first) detection
-  group_by(project_id, location_id, longitude, latitude, task_id, recording_id, recording_date_time, species_code, individual_order) %>%
+  group_by(
+    project_id,
+    location_id,
+    longitude,
+    latitude,
+    task_id,
+    recording_id,
+    recording_date_time,
+    species_code,
+    individual_order
+  ) %>%
   dplyr::filter(detection_time == min(detection_time)) %>%
   ungroup %>%
   # rename task ID's so they don't overlap with point counts
   mutate(task_id = paste0("ARU_", task_id)) %>%
   # remove "outlier" counts that take place at the wrong time of day. this involves calculating time of day which is a bit tedious but doable
-  mutate(timeofday = timeofday_cov$get(longitude, latitude, recording_date_time)) %>%
+  mutate(
+    timeofday = timeofday_cov$get(longitude, latitude, recording_date_time)
+  ) %>%
   group_by(project_id, timeofday) %>%
   mutate(n_tod = n()) %>%
   ungroup %>%
   group_by(project_id) %>%
   mutate(n_proj = n()) %>%
   ungroup %>%
-  mutate(p_tod = n_tod / n_proj,
-         flag_err_date = p_tod < PERC_TOD_THRESHOLD,
-         flag_err_count = FALSE, # only for point counts
-         flag_any = flag_doy | flag_err_date | flag_err_loc | flag_err_count | flag_noise | flag_task_wt | flag_manual)
-
-#3. Tidy and format ----
-#we have to filter to the first detection for each "individual_order" because some individuals have multiple tags
-aru.tidy <- aru.good |> 
-  rename(date_time = recording_date_time,
-         duration = task_duration,
-         method = task_method,
-         survey_id = task_id,
-         status = task_is_complete) |> 
-  mutate(distance = Inf,
-         sensor = "ARU",
-         species = ifelse(species_code=="species", "UNKN", species_code)) |> 
-  group_by(organization, project_id, location_id, location_buffer_m, longitude, latitude, survey_id, date_time, status, method, duration, distance, max_noise_type, max_noise_volume, species, flag_any, flag_doy, flag_err_date, flag_err_loc, flag_noise, flag_task_wt, flag_manual) |> 
-  summarize(count = sum(individual_count)) |> 
+  mutate(
+    p_tod = n_tod / n_proj,
+    flag_err_date = flag_err_date | p_tod < PERC_TOD_THRESHOLD
+  ) |>
+  rename(
+    date_time = recording_date_time,
+    duration = task_duration,
+    method = task_method,
+    survey_id = task_id,
+    status = task_is_complete
+  ) |>
+  mutate(
+    data_source = "WildTrax",
+    sensor = "ARU",
+    distance = Inf,
+    species = ifelse(species_code == "species", "UNKN", species_code)
+  ) |>
+  group_by(
+    data_source,
+    sensor,
+    organization,
+    project_id,
+    location_id,
+    location_buffer_m,
+    longitude,
+    latitude,
+    survey_id,
+    date_time,
+    status,
+    method,
+    duration,
+    distance,
+    max_noise_type,
+    max_noise_volume,
+    species,
+    flag_err_date,
+    flag_err_loc,
+    flag_noise,
+    flag_task_wt,
+    flag_manual
+  ) |>
+  summarize(count = sum(abundance)) |>
   ungroup()
 
-#TIDY PC DATA############
+#4. Tidy point count data ----
 
-#1. Collapse to a single dataframe ----
-pc <- do.call(rbind, pc.wt)
-
-#2. Remove erroneous observations ----
-MIN_PC_COUNT_CUTOFF = 10
-
-pc.good = pc %>%
+pc.tidy <- pc %>%
   # remove non-birds
-  wt_tidy_species(remove=c("abiotic", "insect", "human")) %>%
+  wt_tidy_species(remove = c("abiotic", "insect", "human")) %>%
   # remove surveys with no species or duration info (no distance info is OK, we just assume all birds were counted regardless of distance)
-  dplyr::filter(!(species_code %in% c("NONE")), !is.na(species_code), survey_duration_method != "UNKNOWN") %>%
-  # flag sightings that are outside the breeding window (Jun 1 - Jul 15)
-  mutate(flag_doy = yday(survey_date) %notin% seq(152, 196),
-         # flag sightings that have missing timestamp information (often shows up as being recorded at midnight)
-         flag_err_date = hour(survey_date) == 0 & minute(survey_date) < 2) %>%
+  dplyr::filter(
+    !(species_code %in% c("NONE")),
+    !is.na(species_code),
+    survey_duration_method != "UNKNOWN"
+  ) |>
+  mutate(
+    # flag sightings that have missing timestamp information (often shows up as being recorded at midnight)
+    flag_err_date = hour(survey_date) == 0 & minute(survey_date) < 2
+  ) %>%
   # remove tasks labeled as bad by the "bad_tasks" dataframe
-  left_join(bad_tasks, by = join_by(survey_id == task_id, project_id == project_id, location == location, survey_date == recording_date_time)) %>%
-  mutate(Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite),
-         # flag any tasks that have been manually recommended for removal
-         flag_manual = Retenu_Visite != "oui",
-         # flag anything with buffered locations
-         flag_err_loc = !is.na(location_buffer_m) & location_buffer_m > 0,
-         # more flagging for dates - if year is too early or late
-         flag_err_date = flag_err_date | (survey_date < BEGIN_DATE | survey_date > v.wt)) %>%
+  left_join(
+    bad_tasks,
+    by = join_by(
+      survey_id == task_id,
+      project_id == project_id,
+      location == location,
+      survey_date == recording_date_time
+    )
+  ) %>%
+  mutate(
+    Retenu_Visite = ifelse(is.na(Retenu_Visite), "oui", Retenu_Visite),
+    # flag any tasks that have been manually recommended for removal
+    flag_manual = Retenu_Visite != "oui",
+    # flag anything with buffered locations
+    flag_err_loc = !is.na(location_buffer_m) & location_buffer_m > 0
+  ) %>%
   # more flagging for locations - if coordinates make no sense
-  remove_bad_coordinates(lon_keep = c(-171, -52), lat_keep = c(30, 90), lon_flip = c(0, 170), flag = TRUE) %>%
+  remove_bad_coordinates(
+    lon_keep = c(-171, -52),
+    lat_keep = c(30, 90),
+    lon_flip = c(0, 170),
+    flag = TRUE
+  ) %>%
   # remove any surveys with an individual count of 0
-  mutate(individual_count = as.numeric(individual_count),
-         individual_count = ifelse(is.na(individual_count), 0, individual_count)) %>%
+  mutate(
+    individual_count = as.numeric(individual_count),
+    individual_count = ifelse(is.na(individual_count), 0, individual_count)
+  ) %>%
   group_by(survey_id) %>%
   dplyr::filter(all(individual_count > 0)) %>%
   ungroup %>%
-  group_by(organization, project_id, location_id, longitude, latitude, survey_id, species_code) %>%
+  group_by(
+    organization,
+    project_id,
+    location_id,
+    longitude,
+    latitude,
+    survey_id,
+    species_code
+  ) %>%
   mutate(total_count = sum(individual_count)) %>%
   ungroup %>%
   # rename task ID's so they don't overlap with ARU surveys
-  mutate(survey_id = paste0("PC_", survey_id))
-
-# remove any counts above the 99.9% quantile for the species (or 10)
-pc.species.count.info = pc.good %>%
-  group_by(organization, project_id, location_id, longitude, latitude, survey_id, survey_date, species_code) %>%
-  mutate(total_count = sum(individual_count)) %>%
-  ungroup %>% 
-  distinct(organization, project_id, location_id, longitude, latitude, survey_id, survey_date, species_code, total_count) %>%
-  group_by(species_code) %>%
-  mutate(upper_q = pmax(MIN_PC_COUNT_CUTOFF, quantile(total_count, 0.999))) %>%
-  ungroup %>%
-  distinct(species_code, upper_q)
-
-pc.good.final = pc.good %>%
-  left_join(pc.species.count.info, by = join_by(species_code == species_code)) %>%
-  mutate(flag_err_count = total_count > upper_q,
-         # these two are only for ARUs
-         flag_noise = FALSE,
-         flag_task_wt = FALSE,
-         flag_any = flag_doy | flag_err_date | flag_err_loc | flag_err_count | flag_noise | flag_task_wt | flag_manual)
-
-#3. Tidy and format ----
-pc.tidy <- pc.good.final |> 
-  wt_tidy_species(remove=c("abiotic", "insect", "human")) |> 
-  rename(date_time = survey_date) |> 
-  mutate(method = "PC",
-         duration = as.integer(str_extract(survey_duration_method,
-                                           "(?<=-)[0-9]+(?=min?)"))*60,
-         distance = ifelse(str_sub(survey_distance_method, -3, -1) %in% c("INF", "ARU") | survey_distance_method=="UNKNOWN", Inf,
-                           as.integer(str_extract(survey_distance_method,
-                                                  "(?<=-)[0-9]+(?=m?)"))),
-         max_noise_type = NA,
-         max_noise_volume = NA,
-         count = as.integer(individual_count),
-         species = ifelse(species_code=="species", "UNKN", species_code),
-         status = TRUE) |> 
+  mutate(survey_id = paste0("PC_", survey_id)) |>
+  rename(date_time = survey_date, abundance = individual_count) |>
+  mutate(
+    data_source = "WildTrax",
+    sensor = "PC",
+    method = "PC",
+    duration = as.integer(str_extract(
+      survey_duration_method,
+      "(?<=-)[0-9]+(?=min?)"
+    )) *
+      60,
+    distance = ifelse(
+      str_sub(survey_distance_method, -3, -1) %in%
+        c("INF", "ARU") |
+        survey_distance_method == "UNKNOWN",
+      Inf,
+      as.integer(str_extract(survey_distance_method, "(?<=-)[0-9]+(?=m?)"))
+    ),
+    max_noise_type = NA_character_,
+    max_noise_volume = NA_character_,
+    count = as.integer(abundance),
+    species = ifelse(species_code == "species", "UNKN", species_code),
+    status = TRUE
+  ) %>%
+  mutate(
+    # these two are only for ARUs
+    flag_noise = FALSE,
+    flag_task_wt = FALSE
+  ) |>
   dplyr::select(all_of(colnames(aru.tidy)))
 
-#PUT TOGETHER#########
-
-#1. Combine ----
-wt.tidy <- rbind(aru.tidy, pc.tidy) %>%
+#5. Combine ----
+wt.tidy <- list(aru.tidy, pc.tidy) |>
+  map(
+    ~ .x |>
+      mutate(
+        across(
+          all_of(c(
+            "data_source",
+            "sensor",
+            "organization",
+            "survey_id",
+            "method",
+            "max_noise_type",
+            "max_noise_volume",
+            "species"
+          )),
+          as.character
+        ),
+        across(
+          all_of(c(
+            "project_id",
+            "location_id",
+            "location_buffer_m",
+            "longitude",
+            "latitude",
+            "duration",
+            "distance",
+            "count"
+          )),
+          as.double
+        ),
+        across(
+          all_of(c(
+            "status",
+            "flag_err_date",
+            "flag_err_loc",
+            "flag_noise",
+            "flag_task_wt",
+            "flag_manual"
+          )),
+          as.logical
+        )
+      )
+  ) |>
+  bind_rows() |>
+  # Retain valid four-character species codes and harmonize legacy WildTrax
+  # codes before survey-species counts are combined.
+  mutate(
+    species = case_when(
+      species == "GRAJ" ~ "CAJA",
+      species == "PSFL" ~ "WEFL",
+      species == "MEGU" ~ "COGU",
+      TRUE ~ species
+    )
+  ) |>
+  dplyr::filter(
+    str_length(species) == 4,
+    species != "4794"
+  ) %>%
   # group together observations of the same species that are split up (e.g., from point counts with different distances) and sum
   group_by(survey_id, species) %>%
   mutate(count = sum(count)) %>%
   ungroup %>%
   distinct(survey_id, species, .keep_all = TRUE)
 
-#2. Filter out tasks we don't want ----
-DEG_DECIMALS = 3 # for rounding lat's and lon's - maybe if I want to be more precise I can eventually convert to UTMs and use a real spatial unit but I think this is fine for now
-TIME_ROUND = "10 minutes"
+#EBIRD DATA WRANGLING #################
 
-#filter to approximately North America
-#clean up some bird codes
-#only use species with 4 letter codes
-#remove QC tasks that should not be used
-#remove ARU tasks with too much noise
-wt.use.dups <- wt.tidy  |> 
-  dplyr::filter(method != "None",
-                !is.na(duration),
-                !is.na(distance),
-                !is.na(latitude),
-                !is.na(date_time),
-                str_length(species)==4,
-                species!="4794") |> 
-  mutate(species = case_when(species=="GRAJ" ~ "CAJA",
-                             species=="PSFL" ~ "WEFL",
-                             species=="MEGU" ~ "COGU",
-                             !is.na(species) ~ species)) 
+#1. Get the eBird data ----
+ebd.ca <- read_ebd(file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_Canada_", v.ebd, ".txt")
+))
+ebd.mx <- read_ebd(file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_Mexico_", v.ebd, ".txt")
+))
+ebd.us <- read_ebd(file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_USA_", v.ebd, ".txt")
+))
+ebd.raw <- rbind(ebd.ca, ebd.mx, ebd.us)
+rm(ebd.ca, ebd.mx, ebd.us)
 
-wt_dup_info = wt.use.dups %>%
-  # identify and remove duplicate (or near-duplicate) observations
-  mutate(lat_rounded = round(latitude, DEG_DECIMALS),
-         lon_rounded = round(longitude, DEG_DECIMALS),
-         dttm_rounded = round_date(date_time, TIME_ROUND)) %>%
-  group_by(survey_id) %>%
-  mutate(all_species = paste0(rep(species, count), collapse = "_")) %>%
-  ungroup %>%
-  distinct(survey_id, .keep_all = TRUE) %>%
-  # remove this because it's useless for dataframes where each row corresponds to a survey
-  dplyr::select(-species, -count) %>%
-  # arrange by duration because this is the "tie-breaker" that will be used to determine which surveys we keep. if two "duplicate" surveys have the same duration we just decide by survey_id.
-  arrange(dttm_rounded, lat_rounded, lon_rounded, -duration, -distance, survey_id) %>%
-  group_by(lat_rounded, lon_rounded, dttm_rounded) %>%
-  mutate(n_dups = n(),
-         keep = c(1, numeric(n() - 1))) %>%
-  ungroup
+#2. Species lookup ----
+spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
 
-wt_duplicate_surveys = wt_dup_info %>%
-  dplyr::filter(keep == 0) %>%
-  pull(survey_id)
+#take out duplicates of scientific name
+dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
 
-wt.use = wt.use.dups %>%
-  mutate(flag_dup = survey_id %in% wt_duplicate_surveys)
+spp_use <- wildrtrax::wt_get_species() |>
+  dplyr::filter(
+    species_class == "AVES",
+    !is.na(species_scientific_name),
+    str_squish(species_scientific_name) != "",
+    !species_code %in% dup,
+    species_code %in% spp_qpad$species_code
+  ) |>
+  transmute(
+    species_code,
+    scientific_name_key = str_to_upper(str_squish(species_scientific_name))
+  ) |>
+  distinct()
 
-# also remove these from PC and ARU only datasets that are used to fit QPAD models
-aru.good = aru.good %>%
-  mutate(flag_dup = task_id %in% wt_duplicate_surveys)
+if (anyDuplicated(spp_use$scientific_name_key)) {
+  stop("The WildTrax species lookup has duplicate scientific names")
+}
 
-pc.good.final = pc.good.final %>%
-  mutate(flag_dup = survey_id %in% wt_duplicate_surveys)
+#3. Get unique checklists only ----
+ebd.unique <- auk_unique(ebd.raw)
 
-rm(wt.tidy, wt.use.dups, wt_dup_info)
+#4. Tidy eBird data ----
+# eBird times are local clock times, but the filtered files do not retain a
+# timezone. UTC is used here as a neutral storage timezone; this does not
+# convert the observations from local time to actual UTC.
+# Observations reported as "X" are conservatively assigned a count of one.
+ebd.tidy <- ebd.unique |>
+  dplyr::filter(
+    locality_type != "H",
+    !is.na(checklist_id),
+    checklist_id != "",
+    !is.na(duration_minutes),
+    duration_minutes > 0,
+    !is.na(latitude),
+    !is.na(longitude)
+  ) |>
+  mutate(
+    scientific_name_key = str_to_upper(str_squish(scientific_name)),
+    date_time = ymd_hms(
+      paste(observation_date, time_observations_started),
+      tz = "UTC",
+      quiet = TRUE
+    ),
+    count = case_when(
+      observation_count == "X" ~ 1,
+      TRUE ~ suppressWarnings(as.numeric(observation_count))
+    )
+  ) |>
+  dplyr::filter(!is.na(date_time), !is.na(count), count > 0) |>
+  left_join(
+    spp_use,
+    by = "scientific_name_key",
+    relationship = "many-to-one"
+  ) |>
+  dplyr::filter(!is.na(species_code)) |>
+  transmute(
+    data_source = "eBird",
+    sensor = "PC",
+    organization = "eBird",
+    project_id = 99999,
+    location_id = suppressWarnings(
+      max(c(0, wt.tidy$location_id), na.rm = TRUE)
+    ) +
+      dense_rank(paste(latitude, longitude, sep = ":")),
+    location_buffer_m = 0,
+    longitude,
+    latitude,
+    survey_id = paste0("EBIRD_", checklist_id),
+    date_time,
+    status = TRUE,
+    method = "eBird",
+    duration = as.numeric(duration_minutes) * 60,
+    distance = Inf,
+    max_noise_type = NA_character_,
+    max_noise_volume = NA_character_,
+    species = species_code,
+    count,
+    flag_err_date = FALSE,
+    flag_err_loc = FALSE,
+    flag_noise = FALSE,
+    flag_task_wt = FALSE,
+    flag_manual = FALSE
+  ) |>
+  dplyr::select(all_of(names(wt.tidy)))
 
-# PRT : experimenting with some filters for removing errnoenous species reports, but going to leave this uncommented for now because takes a long time
-# library(terra)
-# wt_species_kdes = with(wt.use, make_individual_kdes(longitude, latitude, date_time, id = species, levels = 0.99, verbose = 1, min_locs = 50))
-# 
-# wt.use = wt.use %>%
-#   arrange(species)
-# wt_species_vect = vect(wt.use, geom = c("longitude", "latitude"), crs = add_EPSG(4326))
-# 
-# wt.use$d_kde_bound = unlist(lapply(unique(wt.use$species), function(sp) {
-#   
-#   message("beginning ", sp)
-#   this_species = wt_species_vect[wt.use$species == sp, ]
-#   this_kde = wt_species_kdes[wt_species_kdes$name == sp, ]
-#   if (nrow(this_kde) == 0) return(rep(NA, nrow(this_species)))
-#   
-#   terra::distance(this_species, this_kde)
-#   
-# }))
-# 
-# d_nearest_conspecific = sapply(1:nrow(wt.use), function(row){
-#   
-#   if (row %% 100 == 0) message("beginning row ", row)
-#   this_ind = wt_species_vect[row, ]
-#   other_conspecifics = wt_species_vect[wt.use$species == this_ind$species, ]
-#   conspecific_dists = terra::distance(other_conspecifics, this_ind)
-#   
-#   min(conspecific_dists[conspecific_dists > 0])
-#   
-# })
+#rm(ebd.unique, ebd.raw)
 
-#3. Make wide ----
-#we don't use wt_make_wide() because we're using a different format now
-#remove columns we dont need anymore
-wt.wide <- wt.use |> 
-  pivot_wider(names_from=species, values_from=count, values_fn=sum, values_fill=0) |> 
-  dplyr::select(-status, -location_buffer_m, -max_noise_type, -max_noise_volume)
+#COMBINE##############
 
-#4. Save ----
-save(wt.wide, aru.good, pc.good.final, file = file.path(root, "WildTrax", v.wt, paste0("02_wildtrax_clean_", v.wt, ".Rdata")))
+#1. Put the three sources together and apply common flags ----
+# The source versions provide reproducible upper date limits. This avoids
+# changing flags merely because the script is rerun on a later date.
+EBD_END_DATE <- as.Date(ceiling_date(my(v.ebd), "month") - days(1))
 
-# wt_wide_sp = st_as_sf(as.data.frame(wt.wide), crs = 4326, coords = c("longitude", "latitude"))
-# 
-# # # Timing: write wt.wide to .RData versus RDS versus parquet
-# time_write_rdata = system.time(save(wt.wide, file = file.path(root, "WildTrax", v.wt, "test.RData")))
-# time_write_parquet = system.time(arrow::write_dataset(wt.wide, file.path(root, "WildTrax", v.wt), format = "parquet", basename_template = "wt_wide_{i}.parquet"))
-# time_write_parquet_ddb = system.time(ddbs_write_dataset(wt_wide_sp, file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb.parquet"), overwrite = TRUE))
-# time_write_parquet_ddb_zstd = system.time(ddbs_write_dataset(wt_wide_sp, file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_zstd.parquet"), overwrite = TRUE, options = list(compression = "zstd")))
-# time_write_parquet_ddb_gzip = system.time(ddbs_write_dataset(wt_wide_sp, file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_gzip.parquet"), overwrite = TRUE, options = list(compression = "gzip")))
-# 
-# time_read_rdata = system.time({
-#   load(file.path(root, "WildTrax", v.wt, "test.RData"))
-#   wt.wide %>% dplyr::filter(CONW > 0)
-# })
-# time_read_parquet = system.time({
-#   lazy_con = arrow::open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# })
-# time_read_parquet_ddb = system.time({
-#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# })
-# time_read_parquet_ddb_zstd = system.time({
-#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_zstd.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# })
-# time_read_parquet_ddb_gzip = system.time({
-#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_gzip.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# })
-# 
-# # for more samples
-# library(microbenchmark)
-# 
-# mb_parquet_read = microbenchmark(list = list(default = {
-#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# }, 
-# zstd = {
-#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_zstd.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# }, 
-# gzip = {
-#   lazy_con = ddbs_open_dataset(file.path(root, "WildTrax", v.wt, "wt_wide_0_ddb_gzip.parquet"))
-#   lazy_con %>% dplyr::filter(CONW > 0) %>% collect
-# }), times = 10) 
+all.tidy <- bind_rows(wt.tidy, ebd.tidy) |>
+  mutate(
+    .source_end_date = case_when(
+      data_source == "WildTrax" ~ as.Date(v.wt),
+      data_source == "eBird" ~ EBD_END_DATE,
+      TRUE ~ as.Date(NA)
+    ),
+    # Shared breeding-season flag: June 1 through July 15, inclusive.
+    flag_doy = is.na(date_time) |
+      yday(date_time) %notin% seq(152, 196),
+    # Retain source-specific date flags and add common date validity checks.
+    flag_err_date = replace_na(flag_err_date, FALSE) |
+      is.na(date_time) |
+      as.Date(date_time) < as.Date(BEGIN_DATE) |
+      as.Date(date_time) > .source_end_date,
+    # Retain source-specific location flags and add common physical checks.
+    flag_err_loc = replace_na(flag_err_loc, FALSE) |
+      is.na(longitude) |
+      is.na(latitude) |
+      longitude < -180 |
+      longitude > 180 |
+      latitude < -90 |
+      latitude > 90 |
+      abs(longitude) == abs(latitude),
+    flag_noise = replace_na(flag_noise, FALSE),
+    flag_task_wt = replace_na(flag_task_wt, FALSE),
+    flag_manual = replace_na(flag_manual, FALSE)
+  ) |>
+  dplyr::select(-.source_end_date) |>
+  mutate(
+    # Preliminary survey-level flag. Duplicate status is added when visit is
+    # created; species-level count flags are stored separately in bird.
+    flag_any = if_any(
+      all_of(c(
+        "flag_doy",
+        "flag_err_date",
+        "flag_err_loc",
+        "flag_noise",
+        "flag_task_wt",
+        "flag_manual"
+      )),
+      identity
+    )
+  )
+
+# A survey must have exactly one data source and sensor assignment. Output object should have zero rows.
+survey_provenance_issues <- all.tidy |>
+  distinct(survey_id, data_source, sensor) |>
+  count(survey_id, name = "n_provenance_combinations") |>
+  dplyr::filter(n_provenance_combinations > 1)
+nrow(survey_provenance_issues)
+
+# The long-data key is one row per survey and species. Output object should have zero rows.
+survey_species_issues <- all.tidy |>
+  count(survey_id, species, name = "n_rows") |>
+  dplyr::filter(n_rows > 1)
+nrow(survey_species_issues)
+
+#2. Split into visit and bird tables ----
+
+# One row per survey, containing only survey-level metadata and flags. When an eBird checklist group has multiple metadata variants, retain the variant represented by the most species. The remaining fields provide deterministic tie-breakers.
+visit <- all.tidy |>
+  dplyr::select(-count) |>
+  group_by(across(-species)) |>
+  summarize(n_species = n(), .groups = "drop") |>
+  arrange(
+    survey_id,
+    desc(n_species),
+    date_time,
+    latitude,
+    longitude,
+    duration,
+    location_id
+  ) |>
+  distinct(survey_id, .keep_all = TRUE) |>
+  dplyr::select(-n_species) |>
+  # Candidate duplicate visits have approximately the same location and start time. Only groups containing WildTrax are flagged, which avoids treating independent eBird-only checklists as duplicates.
+  mutate(
+    .dup_latitude = round(latitude, 3),
+    .dup_longitude = round(longitude, 3),
+    .dup_date_time = round_date(date_time, "10 minutes")
+  ) |>
+  # Retain one survey per duplicate group by prioritizing: (1) surveys with no existing flags, (2) WildTrax over eBird, (3) ARU over point count, (4) longer duration, (5) greater survey distance, and (6) survey_id as a deterministic final tie-breaker. All other surveys in the group are flagged.
+  arrange(
+    .dup_date_time,
+    .dup_latitude,
+    .dup_longitude,
+    flag_any,
+    desc(data_source == "WildTrax"),
+    desc(sensor == "ARU"),
+    desc(duration),
+    desc(distance),
+    survey_id
+  ) |>
+  group_by(.dup_latitude, .dup_longitude, .dup_date_time) |>
+  mutate(
+    flag_dup = n() > 1 &
+      any(data_source == "WildTrax") &
+      row_number() > 1,
+    # flag_any remains a survey-level flag: filtering it removes the entire
+    # visit, including secondary copies from duplicate groups.
+    flag_any = flag_any | flag_dup
+  ) |>
+  ungroup() |>
+  arrange(survey_id) |>
+  dplyr::select(-starts_with(".dup_"))
+
+# One row per survey and species, containing only bird detections. The
+# flag_err_count field applies only to that species detection and is therefore
+# not included in visit$flag_any. Use the
+# 99.9% quantile for species with at least 1,000 observations, the 99.5%
+# quantile for species with 200-999 observations, and no automated count flag
+# below 200 observations. Retain only the logical flag in the full table.
+bird <- all.tidy |>
+  dplyr::select(survey_id, species, count) |>
+  group_by(species) |>
+  mutate(
+    flag_err_count = if (n() >= MIN_Q999_OBSERVATIONS) {
+      count >
+        max(
+          MIN_COUNT_CUTOFF,
+          quantile(count, probs = 0.999, na.rm = TRUE, names = FALSE)
+        )
+    } else if (n() >= MIN_Q995_OBSERVATIONS) {
+      count >
+        max(
+          MIN_COUNT_CUTOFF,
+          quantile(count, probs = 0.995, na.rm = TRUE, names = FALSE)
+        )
+    } else {
+      rep(FALSE, n())
+    }
+  ) |>
+  ungroup()
+
+#3. Check & interrogate output ----
+
+# Each survey should have exactly one row in visit. Output object should have zero rows.
+visit_key_issues <- visit |>
+  count(survey_id, name = "n_rows") |>
+  dplyr::filter(n_rows > 1)
+nrow(visit_key_issues)
+
+# Every bird record should link to a survey in visit. Output object should have zero rows.
+bird_visit_issues <- bird |>
+  anti_join(
+    dplyr::select(visit, survey_id),
+    by = "survey_id"
+  ) |>
+  distinct(survey_id)
+nrow(bird_visit_issues)
+
+# Each bird detection should have a unique survey and species key. Output object should have zero rows.
+bird_key_issues <- bird |>
+  count(survey_id, species, name = "n_rows") |>
+  dplyr::filter(n_rows > 1)
+nrow(bird_key_issues)
+
+# Visit flags should be complete and represented correctly by flag_any. Output
+# object should have zero rows.
+visit_flag_issues <- visit |>
+  dplyr::filter(
+    if_any(starts_with("flag_"), is.na) |
+      flag_any !=
+        if_any(
+          all_of(c(
+            "flag_doy",
+            "flag_err_date",
+            "flag_err_loc",
+            "flag_noise",
+            "flag_task_wt",
+            "flag_manual",
+            "flag_dup"
+          )),
+          identity
+        )
+  )
+nrow(visit_flag_issues)
+
+# Bird values and count flags should be complete and valid. Output object should have zero rows.
+bird_value_issues <- bird |>
+  dplyr::filter(
+    is.na(species) |
+      species == "" |
+      is.na(count) |
+      !is.finite(count) |
+      count <= 0 |
+      is.na(flag_err_count)
+  )
+nrow(bird_value_issues)
+
+# Provide one compact overview; all checks should report zero issues.
+output_check_summary <- tibble(
+  check = c(
+    "survey provenance",
+    "pre-split survey-species key",
+    "visit key",
+    "bird key",
+    "bird-to-visit link",
+    "visit flags",
+    "bird values"
+  ),
+  n_issues = c(
+    nrow(survey_provenance_issues),
+    nrow(survey_species_issues),
+    nrow(visit_key_issues),
+    nrow(bird_key_issues),
+    nrow(bird_visit_issues),
+    nrow(visit_flag_issues),
+    nrow(bird_value_issues)
+  )
+)
+output_check_summary
+
+# Retain a compact review table containing both the selected survey and the
+# flagged copies from each duplicate group.
+duplicate_visit_review <- visit |>
+  mutate(
+    .dup_latitude = round(latitude, 3),
+    .dup_longitude = round(longitude, 3),
+    .dup_date_time = round_date(date_time, "10 minutes")
+  ) |>
+  group_by(.dup_latitude, .dup_longitude, .dup_date_time) |>
+  dplyr::filter(any(flag_dup)) |>
+  mutate(duplicate_group = cur_group_id()) |>
+  ungroup() |>
+  dplyr::select(
+    duplicate_group,
+    survey_id,
+    flag_dup,
+    data_source,
+    sensor,
+    organization,
+    project_id,
+    location_id,
+    date_time,
+    latitude,
+    longitude,
+    duration,
+    distance,
+    flag_doy,
+    flag_err_date,
+    flag_err_loc,
+    flag_noise,
+    flag_task_wt,
+    flag_manual,
+    flag_any
+  ) |>
+  arrange(duplicate_group, flag_dup, survey_id)
+
+# Show the number of retained and flagged surveys from each source and sensor.
+duplicate_visit_summary <- duplicate_visit_review |>
+  count(data_source, sensor, flag_dup, name = "n_surveys")
+duplicate_visit_summary
+
+#4. Add a lookup table for truncation values ----
+
+# Retain one compact diagnostic row per species rather than attaching these thresholds to every row in the full bird table.
+count_limits <- bird |>
+  group_by(species) |>
+  summarize(
+    n_observations = n(),
+    quantile_probability = if (n_observations >= MIN_Q999_OBSERVATIONS) {
+      0.999
+    } else if (n_observations >= MIN_Q995_OBSERVATIONS) {
+      0.995
+    } else {
+      NA_real_
+    },
+    count_quantile = if (n_observations >= MIN_Q999_OBSERVATIONS) {
+      quantile(
+        count,
+        probs = 0.999,
+        na.rm = TRUE,
+        names = FALSE
+      )
+    } else if (n_observations >= MIN_Q995_OBSERVATIONS) {
+      quantile(
+        count,
+        probs = 0.995,
+        na.rm = TRUE,
+        names = FALSE
+      )
+    } else {
+      NA_real_
+    },
+    applied_cutoff = max(MIN_COUNT_CUTOFF, count_quantile),
+    max_count = max(count, na.rm = TRUE),
+    max_to_cutoff_ratio = max_count / applied_cutoff,
+    n_flagged = sum(flag_err_count, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(n_flagged), desc(max_count))
+
+#5. Save ----
+
+save(
+  visit,
+  bird,
+  count_limits,
+  output_check_summary,
+  file = file.path(
+    root,
+    paste0(
+      "03_BAMDataset_WT-",
+      v.wt,
+      "_EBd-",
+      v.ebd,
+      ".Rdata"
+    )
+  )
+)
