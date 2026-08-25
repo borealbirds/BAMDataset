@@ -64,7 +64,7 @@ for(i in seq_len(n_proj)){
   #Do each sensor type separately because the reports have different columns and we need different things for each sensor type
   if(proj$project_sensor[i]=="ARU"){
     
-    dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "ARU", report = "main"))
+    dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "ARU", reports = "main"))
     
     if("data.frame" %in% class(dat.try)){
       aru.list[[i]] <- dat.try
@@ -74,7 +74,7 @@ for(i in seq_len(n_proj)){
   
   if(proj$project_sensor[i]=="PC"){
     
-    dat.try <- try(wt_download_report(project_id = proj$project_id[i], "PC", report="main"))
+    dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "PC", reports = "main"))
     
     if("data.frame" %in% class(dat.try)){
       pc.list[[i]] <- dat.try
