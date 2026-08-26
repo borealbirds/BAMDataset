@@ -20,6 +20,10 @@
 library(tidyverse) #basic data wrangling
 library(wildrtrax) #to download data from wildtrax
 library(readxl) #to read excel files
+library(data.table)
+library(duckdb)
+library(sf)
+library(duckspatial)
 
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
@@ -55,6 +59,21 @@ n_proj = nrow(proj)
 aru.list <- vector(mode = "list", length = n_proj)
 pc.list <- vector(mode = "list", length = n_proj)
 error.log <- data.frame()
+
+try_again = function(expr, num_times = 1) {
+  
+  n_tries = 0
+  while(n_tries < num_times) {
+    out = try(expr)
+    # break out of loop if it worked
+    if (!is(out, "try-error")) n_tries = num_times
+    else n_tries = n_tries + 1
+  }
+  
+  out
+  
+}
+
 for(i in seq_len(n_proj)){
   
   #authenticate each time because this loop takes forever
@@ -64,7 +83,7 @@ for(i in seq_len(n_proj)){
   #Do each sensor type separately because the reports have different columns and we need different things for each sensor type
   if(proj$project_sensor[i]=="ARU"){
     
-    dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "ARU", reports = "main"))
+    dat.try <- try_again(wt_download_report(project_id = proj$project_id[i], sensor_id = "ARU", reports = "main"), 5)
     
     if("data.frame" %in% class(dat.try)){
       aru.list[[i]] <- dat.try
@@ -74,7 +93,7 @@ for(i in seq_len(n_proj)){
   
   if(proj$project_sensor[i]=="PC"){
     
-    dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "PC", reports = "main"))
+    dat.try <- try_again(wt_download_report(project_id = proj$project_id[i], sensor_id = "PC", reports = "main"), 5)
     
     if("data.frame" %in% class(dat.try)){
       pc.list[[i]] <- dat.try
@@ -90,37 +109,6 @@ for(i in seq_len(n_proj)){
   }
   
   print(paste0("Finished dataset ", proj$project[i], " : ", i, " of ", nrow(proj), " projects"))
-  
-}
-
-for (i in seq_len(n_proj)) {
-  
-  if (!is.data.frame(pc.list[[i]]) && !is.data.frame(aru.list[[i]])) {
-    message("retrying i = ", i)
-    
-    if(proj$project_sensor[i]=="ARU"){
-      
-      dat.try <- try(wt_download_report(project_id = proj$project_id[i], sensor_id = "ARU", report = "main"))
-      
-      if("data.frame" %in% class(dat.try)){
-        aru.list[[i]] <- dat.try
-      }
-      
-    }
-    
-    if(proj$project_sensor[i]=="PC"){
-      
-      dat.try <- try(wt_download_report(project_id = proj$project_id[i], "PC", report="main"))
-      
-      if("data.frame" %in% class(dat.try)){
-        pc.list[[i]] <- dat.try
-      }
-      
-    }
-    
-    if ("data.frame" %in% class(dat.try)) error.log = error.log %>% dplyr::filter(project_id != proj$project_id[i])
-    
-  }
   
 }
 
@@ -146,12 +134,12 @@ error <- tryCatch({
 for(i in seq_len(nrow(error))){
   
   if(error$sensor[i]=="ARU"){
-    aru.wt[[length(aru.wt)+1]] <- read.csv(file.path(root, "WildTrax", "website downloads (error projects)", error$file[i]))
+    aru.wt[[length(aru.wt)+1]] <- fread(file.path(root, "WildTrax", "website downloads (error projects)", error$file[i]))
     names(aru.wt)[[length(aru.wt)]] <- error$project_id[i]
   }
   
   if(error$sensor[i]=="PC"){
-    pc.wt[[length(pc.wt)+1]] <- read.csv(file.path(root, "WildTrax", "website downloads (error projects)", error$file[i]))
+    pc.wt[[length(pc.wt)+1]] <- fread(file.path(root, "WildTrax", "website downloads (error projects)", error$file[i]))
     names(pc.wt)[[length(pc.wt)]] <- error$project_id[i]
   }
   
@@ -160,6 +148,27 @@ for(i in seq_len(nrow(error))){
 }
 
 #5. Save date stamped data & project list----
+UTM_CRS = 4326
+
+aru_df = rbindlist(aru.wt, fill = TRUE)[is.finite(longitude) & is.finite(latitude)]
+pc_df = rbindlist(pc.wt, fill = TRUE)[is.finite(longitude) & is.finite(latitude)]
+
+aru_sf = st_as_sf(aru_df, coords = c("longitude", "latitude"), crs = UTM_CRS)
+pc_sf = st_as_sf(pc_df, coords = c("longitude", "latitude"), crs = UTM_CRS)
+
+## write to duckdb ----
+
 out_dir = file.path(root, "WildTrax", Sys.Date())
 if (!dir.exists(out_dir)) dir.create(out_dir)
-save(aru.wt, pc.wt, proj, error.log, file=file.path(out_dir, paste0("01_wildtrax_raw_", Sys.Date(), ".Rdata")))
+db_conn_path = file.path(out_dir, paste0("01_wildtrax_raw_", Sys.Date(), ".duckdb"))
+
+# make connection
+ddbs_write_dataset(aru_sf, db_conn_path, layer = "aru", overwrite = TRUE)
+
+# re-load connection to be able to add more data
+db_conn = dbConnect(duckdb(db_conn_path))
+dbExecute(db_conn, "LOAD spatial") # have to do this for whatever reason
+
+# write the other two files
+ddbs_write_table(db_conn, pc_sf, name = "pc", overwrite = TRUE)
+dbWriteTable(db_conn, name = "error_log", error.log)
