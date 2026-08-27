@@ -205,7 +205,7 @@ aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   mutate(longitude = st_coordinates(.)[, 1], 
          latitude = st_coordinates(.)[, 2],
          location = as.character(location),
-         recording_date_time = as.POSIXct(recording_date_time, format = "%Y-%m-%d %H:%M:%OS")) %>% 
+         recording_date_time = as.POSIXct(recording_date_time, format = "%Y-%m-%d %H:%M:%OS", tz = "UTC")) %>% 
   # drop geometry for now
   st_drop_geometry %>%
   # remove non-birds
@@ -342,7 +342,7 @@ pc_qpad_ready <- ddbs_read_table(db_conn, "pc") %>%
   mutate(longitude = st_coordinates(.)[, 1], 
          latitude = st_coordinates(.)[, 2],
          location = as.character(location),
-         survey_date_time = as.POSIXct(survey_date_time, format = "%Y-%m-%d %H:%M:%OS"),
+         survey_date_time = as.POSIXct(survey_date_time, format = "%Y-%m-%d %H:%M:%OS", tz = "UTC"),
          survey_date = survey_date_time) %>% 
   # drop geometry for now
   st_drop_geometry %>%
