@@ -18,7 +18,7 @@ cov_tod_bin = function(cov_name) {
     tz_vals = lutz::tz_lookup(xy_proj, warn = FALSE, method = "accurate")
     dates_forced = force_tzs(t, tz_vals)
     
-    solar_data = data.frame(date = as.Date(t),
+    solar_data = data.frame(date = as.Date(dates_forced),
                             lat = xy_proj_crds[, 2],
                             lon = xy_proj_crds[, 1])
   
@@ -107,13 +107,13 @@ get_tod = function(t_since_nauticaldawn,
   
   case_when(
     # 0.1. nautical dawn when both are in the same day
-    !is.na(t_since_nauticaldawn) & !is.na(t_since_dawn) & t_since_nauticaldawn >= 0 & t_since_dawn <= 0 & t_since_nauticaldawn > t_since_dawn ~ "nauticaldawn",
+    !is.na(t_since_nauticaldawn) & t_since_nauticaldawn < t_since_dawn & !is.na(t_since_dawn) & t_since_nauticaldawn >= 0 & t_since_dawn <= 0 & t_since_nauticaldawn > t_since_dawn ~ "nauticaldawn",
     # 0.2. nautical dawn when nautical dawn is before 12 AM and civil dawn is after 12 AM
-    !is.na(t_since_nauticaldawn) & !is.na(t_since_dawn) & (t_since_nauticaldawn >= 0 | t_since_dawn <= 0) & t_since_nauticaldawn < t_since_dawn ~ "nauticaldawn",
+    !is.na(t_since_nauticaldawn) & t_since_nauticaldawn < t_since_dawn & !is.na(t_since_dawn) & (t_since_nauticaldawn >= 0 | t_since_dawn <= 0) & t_since_nauticaldawn < t_since_dawn ~ "nauticaldawn",
     # 0.3. nautical twilight is the darkest it gets; anything between nadir and civil dawn is nautical dawn
-    is.na(t_since_nauticaldawn) & !is.na(t_since_dawn) & t_since_nadir >= 0 & t_since_dawn <= 0 ~ "nauticaldawn",
+    (is.na(t_since_nauticaldawn) | t_since_nauticaldawn > t_since_dawn) & !is.na(t_since_dawn) & t_since_nadir >= 0 & t_since_dawn <= 0 ~ "nauticaldawn",
     # 0.3.5. nautical twilight is the darkest it gets; anything between nadir and civil dawn is nautical dawn - case for if nadir and civil dawn are not in same part of the 24-hour clock
-    is.na(t_since_nauticaldawn) & !is.na(t_since_dawn) & (t_since_dawn > t_since_nadir) & (t_since_nadir >= 0 | t_since_dawn <= 0) ~ "nauticaldawn",
+    (is.na(t_since_nauticaldawn) | t_since_nauticaldawn > t_since_dawn) & !is.na(t_since_dawn) & (t_since_dawn > t_since_nadir) & (t_since_nadir >= 0 | t_since_dawn <= 0) ~ "nauticaldawn",
     # 0.4. nautical twilight is the darkest it gets; anything between nadir and civil dusk is nautical dusk
     is.na(t_since_nauticaldusk) & !is.na(t_since_dusk) & t_since_nadir <= 0 & t_since_dusk >= 0 ~ "nauticaldusk",
     # 0.4.5. nautical twilight is the darkest it gets; anything between nadir and civil dusk is nautical dusk - case for if nadir and civil dusk are not in same part of the 24-hour clock

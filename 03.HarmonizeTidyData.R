@@ -19,6 +19,8 @@ library(data.table) #binding with missing columns
 library(readxl)
 library(terra)
 library(sf)
+library(duckdb)
+library(duckspatial)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
@@ -26,7 +28,7 @@ lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Set the WildTrax version ----
-v.wt <- "2026-07-10"
+v.wt <- "2026-08-26"
 
 #4. Set the eBird version ----
 v.ebd <- "Jun-2026"
@@ -144,32 +146,20 @@ wt_replace_tmtt <- function(data, calc = "round") {
       -pred
     )
   }
-  dat.tmtt <- suppressWarnings(select(
-    rows_update(
-      mutate(
-        dat.tmtt,
-        abundance = case_when(
-          abundance %in% c("TMTT", "TNPE") ~ NA_real_,
-          TRUE ~ as.numeric(abundance)
-        )
-      ),
-      dat.tmt,
-      by = c("id")
-    ),
-    -id
-  ))
+  
+  dat.tmtt = dat.tmtt %>%
+    mutate(abundance = case_when(abundance %in% c("TMTT", "TNPE") ~ NA_real_,
+                                 .default = as.numeric(abundance))) %>%
+    dplyr::select(-id)
+  
   return(dat.tmtt)
 }
 
 # WILDTRAX DATA WRANGLING #################
 
 #1. Get the downloaded data object ----
-load(file.path(
-  root,
-  "WildTrax",
-  v.wt,
-  paste0("01_wildtrax_raw_", v.wt, ".Rdata")
-))
+db_conn_path = file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".duckdb"))
+db_conn = dbConnect(duckdb(db_conn_path))
 
 bad_tasks <- read_xlsx(file.path(
   root,
@@ -184,11 +174,7 @@ bad_aru_projects <- read_csv(file.path(
   "aru_bad_timestamps_prt_20260716.csv"
 ))
 
-#2. Collapse to single dataframe ----
-aru <- do.call(rbind, aru.wt)
-pc <- do.call(rbind, pc.wt)
-
-#3. Tidy ARU data ----
+#2. Tidy ARU data ----
 #we have to filter to the first detection for each "individual_order" because some individuals have multiple tags
 # Locations:
 #           - some latitudes are positive when they should be negative -> swap those EXCEPT a few point counts from the Aleutians which should stay the same! AND there are some large negative longitudes (around the same area) that should be flipped! But not always reliable here so for now going to just leave out all large western longitudes. Suggest 171 W as a boundary and can look into it more later. Filter accordingly
@@ -214,7 +200,14 @@ MIN_Q999_OBSERVATIONS <- 1000
 
 timeofday_cov <- cov_tod_bin("timeofday")
 
-aru.tidy <- aru %>%
+aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>% 
+  # add lat and lon as columns so they're not just in geometries
+  mutate(longitude = st_coordinates(.)[, 1], 
+         latitude = st_coordinates(.)[, 2],
+         location = as.character(location),
+         recording_date_time = as.POSIXct(recording_date_time)) %>% 
+  # drop geometry for now
+  st_drop_geometry %>%
   # remove non-birds
   wt_tidy_species(remove = c("abiotic", "insect", "human")) %>%
   dplyr::filter(
@@ -311,7 +304,10 @@ aru.tidy <- aru %>%
     sensor = "ARU",
     distance = Inf,
     species = ifelse(species_code == "species", "UNKN", species_code)
-  ) |>
+  ) %>%
+  collect
+
+aru.tidy = aru_qpad_ready |>
   group_by(
     data_source,
     sensor,
@@ -339,9 +335,17 @@ aru.tidy <- aru %>%
   summarize(count = sum(abundance)) |>
   ungroup()
 
-#4. Tidy point count data ----
+#3. Tidy point count data ----
 
-pc.tidy <- pc %>%
+pc_qpad_ready <- ddbs_read_table(db_conn, "pc") %>%
+  # add lat and lon as columns so they're not just in geometries
+  mutate(longitude = st_coordinates(.)[, 1], 
+         latitude = st_coordinates(.)[, 2],
+         location = as.character(location),
+         survey_date_time = as.POSIXct(survey_date_time),
+         survey_date = survey_date_time) %>% 
+  # drop geometry for now
+  st_drop_geometry %>%
   # remove non-birds
   wt_tidy_species(remove = c("abiotic", "insect", "human")) %>%
   # remove surveys with no species or duration info (no distance info is OK, we just assume all birds were counted regardless of distance)
@@ -352,7 +356,7 @@ pc.tidy <- pc %>%
   ) |>
   mutate(
     # flag sightings that have missing timestamp information (often shows up as being recorded at midnight)
-    flag_err_date = hour(survey_date) == 0 & minute(survey_date) < 2
+    flag_err_date = hour(survey_date_time) == 0 & minute(survey_date_time) < 2
   ) %>%
   # remove tasks labeled as bad by the "bad_tasks" dataframe
   left_join(
@@ -361,7 +365,7 @@ pc.tidy <- pc %>%
       survey_id == task_id,
       project_id == project_id,
       location == location,
-      survey_date == recording_date_time
+      survey_date_time == recording_date_time
     )
   ) %>%
   mutate(
@@ -380,12 +384,18 @@ pc.tidy <- pc %>%
   ) %>%
   # remove any surveys with an individual count of 0
   mutate(
-    individual_count = as.numeric(individual_count),
-    individual_count = ifelse(is.na(individual_count), 0, individual_count)
+    abundance = as.numeric(abundance),
+    abundance = ifelse(is.na(abundance), 0, abundance)
   ) %>%
   group_by(survey_id) %>%
-  dplyr::filter(all(individual_count > 0)) %>%
+  dplyr::filter(all(abundance > 0)) %>%
   ungroup %>%
+  # rename task ID's so they don't overlap with ARU surveys
+  mutate(survey_id = paste0("PC_", survey_id)) |>
+  rename(date_time = survey_date_time, abundance = abundance) %>%
+  collect
+
+pc.tidy = pc_qpad_ready %>%
   group_by(
     organization,
     project_id,
@@ -395,11 +405,8 @@ pc.tidy <- pc %>%
     survey_id,
     species_code
   ) %>%
-  mutate(total_count = sum(individual_count)) %>%
+  mutate(total_count = sum(abundance)) %>%
   ungroup %>%
-  # rename task ID's so they don't overlap with ARU surveys
-  mutate(survey_id = paste0("PC_", survey_id)) |>
-  rename(date_time = survey_date, abundance = individual_count) |>
   mutate(
     data_source = "WildTrax",
     sensor = "PC",
@@ -429,7 +436,7 @@ pc.tidy <- pc %>%
   ) |>
   dplyr::select(all_of(colnames(aru.tidy)))
 
-#5. Combine ----
+#4. Combine ----
 wt.tidy <- list(aru.tidy, pc.tidy) |>
   map(
     ~ .x |>
@@ -869,7 +876,7 @@ duplicate_visit_review <- visit |>
   arrange(duplicate_group, flag_dup, survey_id)
 
 # Show the number of retained and flagged surveys from each source and sensor.
-duplicate_visit_summary <- duplicate_visit_review |>
+duplicate_visit_summary <- visit |>
   count(data_source, sensor, flag_dup, name = "n_surveys")
 duplicate_visit_summary
 
@@ -914,19 +921,39 @@ count_limits <- bird |>
 
 #5. Save ----
 
-save(
-  visit,
-  bird,
-  count_limits,
-  output_check_summary,
-  file = file.path(
-    root,
-    paste0(
-      "03_BAMDataset_WT-",
-      v.wt,
-      "_EBd-",
-      v.ebd,
-      ".Rdata"
-    )
-  )
-)
+UTM_CRS = 4326
+
+aru_sf = st_as_sf(aru_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS)
+pc_sf = st_as_sf(pc_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS)
+visit_sf = st_as_sf(visit, coords = c("longitude", "latitude"), crs = UTM_CRS)
+
+## write to duckdb databases - for QPAD and for models ----
+
+db_conn_path_qpad = file.path(root, paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb"))
+db_conn_path_models = file.path(root, paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb"))
+
+### qpad first! ----
+
+# make connection
+ddbs_write_dataset(aru_sf, db_conn_path_qpad, layer = "aru", overwrite = TRUE)
+
+# re-load connection to be able to add more data
+db_conn_qpad = dbConnect(duckdb(db_conn_path_qpad))
+dbExecute(db_conn_qpad, "LOAD spatial") # have to do this for whatever reason
+
+# write the other file
+ddbs_write_table(db_conn_qpad, pc_sf, name = "pc", overwrite = TRUE)
+
+### now for the models ----
+
+# make connection
+ddbs_write_dataset(visit_sf, db_conn_path_models, layer = "visit", overwrite = TRUE)
+
+# re-load connection to be able to add more data
+db_conn_models = dbConnect(duckdb(db_conn_path_models))
+dbExecute(db_conn_models, "LOAD spatial") # have to do this for whatever reason
+
+# write the other files
+dbWriteTable(db_conn_models, name = "bird", bird)
+dbWriteTable(db_conn_models, name = "count_limits", count_limits)
+dbWriteTable(db_conn_models, name = "output_check_summary", output_check_summary)
