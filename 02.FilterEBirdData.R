@@ -211,5 +211,5 @@ fwrite(ebd.unique, file.path(
   root,
   "eBird",
   v.ebd,
-  paste0("03_ebd_filtered_ALL_", v.ebd, ".txt")
+  paste0("03_ebd_filtered_ALL_", v.ebd, ".csv")
 ))
