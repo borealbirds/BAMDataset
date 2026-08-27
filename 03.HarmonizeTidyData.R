@@ -503,69 +503,31 @@ wt.tidy <- list(aru.tidy, pc.tidy) |>
 
 #EBIRD DATA WRANGLING #################
 
-#1. Get the eBird data ----
-ebd.ca <- read_ebd(file.path(
+ebd.unique = fread(file.path(
   root,
   "eBird",
   v.ebd,
-  paste0("03_ebd_filtered_Canada_", v.ebd, ".txt")
+  paste0("03_ebd_filtered_ALL_", v.ebd, ".txt")
 ))
-ebd.mx <- read_ebd(file.path(
-  root,
-  "eBird",
-  v.ebd,
-  paste0("03_ebd_filtered_Mexico_", v.ebd, ".txt")
-))
-ebd.us <- read_ebd(file.path(
-  root,
-  "eBird",
-  v.ebd,
-  paste0("03_ebd_filtered_USA_", v.ebd, ".txt")
-))
-ebd.raw <- rbind(ebd.ca, ebd.mx, ebd.us)
-rm(ebd.ca, ebd.mx, ebd.us)
 
-#2. Species lookup ----
-spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
-
-#take out duplicates of scientific name
-dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
-
-spp_use <- wildrtrax::wt_get_species() |>
-  dplyr::filter(
-    species_class == "AVES",
-    !is.na(species_scientific_name),
-    str_squish(species_scientific_name) != "",
-    !species_code %in% dup,
-    species_code %in% spp_qpad$species_code
-  ) |>
-  transmute(
-    species_code,
-    scientific_name_key = str_to_upper(str_squish(species_scientific_name))
-  ) |>
-  distinct()
-
-if (anyDuplicated(spp_use$scientific_name_key)) {
-  stop("The WildTrax species lookup has duplicate scientific names")
-}
-
-#3. Get unique checklists only ----
-ebd.unique <- auk_unique(ebd.raw)
-
-#4. Tidy eBird data ----
+#1. Tidy eBird data ----
 # eBird times are local clock times, but the filtered files do not retain a
 # timezone. UTC is used here as a neutral storage timezone; this does not
 # convert the observations from local time to actual UTC.
 # Observations reported as "X" are conservatively assigned a count of one.
 ebd.tidy <- ebd.unique |>
   dplyr::filter(
+    # only include non-hotspots because hotspots are often defined at spatially imprecise locations
     locality_type != "H",
+    # make sure nothing is NA or missing
     !is.na(checklist_id),
     checklist_id != "",
     !is.na(duration_minutes),
     duration_minutes > 0,
     !is.na(latitude),
-    !is.na(longitude)
+    !is.na(longitude),
+    # don't want checklists from large parties as these probably can't be compared to point counts
+    number_observers == 1
   ) |>
   mutate(
     scientific_name_key = str_to_upper(str_squish(scientific_name)),

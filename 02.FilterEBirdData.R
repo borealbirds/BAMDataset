@@ -151,6 +151,65 @@ filtered_us <- auk_filter(
     "observation_date",
     "time_observations_started",
     "observer_id",
+    "number_observers",
     "duration_minutes"
   )
 )
+
+#4. Data wrangling ----
+
+#4.1. Get the eBird data ----
+ebd.ca <- read_ebd(file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_Canada_", v.ebd, ".txt")
+))
+ebd.mx <- read_ebd(file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_Mexico_", v.ebd, ".txt")
+))
+ebd.us <- read_ebd(file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_USA_", v.ebd, ".txt")
+))
+ebd.raw <- rbind(ebd.ca, ebd.mx, ebd.us)
+rm(ebd.ca, ebd.mx, ebd.us)
+
+#4.2. Species lookup ----
+spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
+
+#take out duplicates of scientific name
+dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
+
+spp_use <- wildrtrax::wt_get_species() |>
+  dplyr::filter(
+    species_class == "AVES",
+    !is.na(species_scientific_name),
+    str_squish(species_scientific_name) != "",
+    !species_code %in% dup,
+    species_code %in% spp_qpad$species_code
+  ) |>
+  transmute(
+    species_code,
+    scientific_name_key = str_to_upper(str_squish(species_scientific_name))
+  ) |>
+  distinct()
+
+if (anyDuplicated(spp_use$scientific_name_key)) {
+  stop("The WildTrax species lookup has duplicate scientific names")
+}
+
+#4.3. Get unique checklists only ----
+ebd.unique <- auk_unique(ebd.raw)
+
+fwrite(ebd.unique, file.path(
+  root,
+  "eBird",
+  v.ebd,
+  paste0("03_ebd_filtered_ALL_", v.ebd, ".txt")
+))
