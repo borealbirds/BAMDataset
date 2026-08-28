@@ -24,6 +24,8 @@
 
 library(tidyverse) #basic data wrangling
 library(auk) #eBird wrangling
+library(data.table) # slightly faster data wrangling for some things
+library(wildrtrax)
 
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
@@ -177,7 +179,7 @@ ebd.us <- read_ebd(file.path(
   v.ebd,
   paste0("03_ebd_filtered_USA_", v.ebd, ".txt")
 ))
-ebd.raw <- rbind(ebd.ca, ebd.mx, ebd.us)
+ebd.raw <- rbindlist(list(ebd.ca, ebd.mx, ebd.us))
 rm(ebd.ca, ebd.mx, ebd.us)
 
 #4.2. Species lookup ----
@@ -185,6 +187,9 @@ spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
 
 #take out duplicates of scientific name
 dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
+
+source("WTlogin.R")
+wt_auth()
 
 spp_use <- wildrtrax::wt_get_species() |>
   dplyr::filter(

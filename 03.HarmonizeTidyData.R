@@ -507,15 +507,36 @@ ebd.unique = fread(file.path(
   root,
   "eBird",
   v.ebd,
-  paste0("03_ebd_filtered_ALL_", v.ebd, ".txt")
+  paste0("03_ebd_filtered_ALL_", v.ebd, ".csv")
 ))
+
+spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
+
+#take out duplicates of scientific name
+dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
+
+spp_use <- wildrtrax::wt_get_species() |>
+  dplyr::filter(
+    species_class == "AVES",
+    !is.na(species_scientific_name),
+    str_squish(species_scientific_name) != "",
+    !species_code %in% dup,
+    species_code %in% spp_qpad$species_code
+  ) |>
+  transmute(
+    species_code,
+    scientific_name_key = str_to_upper(str_squish(species_scientific_name))
+  ) |>
+  distinct()
+
 
 #1. Tidy eBird data ----
 # eBird times are local clock times, but the filtered files do not retain a
 # timezone. UTC is used here as a neutral storage timezone; this does not
 # convert the observations from local time to actual UTC.
 # Observations reported as "X" are conservatively assigned a count of one.
-ebd.tidy <- ebd.unique |>
+ebd.tidy <- ebd.unique %>%
+  mutate(number_observers = ifelse("number_observers" %notin% names(.), 1, number_observers)) %>%
   dplyr::filter(
     # only include non-hotspots because hotspots are often defined at spatially imprecise locations
     locality_type != "H",
