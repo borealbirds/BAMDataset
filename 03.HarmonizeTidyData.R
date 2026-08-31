@@ -510,7 +510,7 @@ ebd.unique = fread(file.path(
   paste0("03_ebd_filtered_ALL_", v.ebd, ".csv")
 ))
 
-spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
+spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-08-26.csv"))
 
 #take out duplicates of scientific name
 dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
@@ -906,9 +906,15 @@ count_limits <- bird |>
 
 UTM_CRS = 4326
 
-aru_sf = st_as_sf(aru_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS)
-pc_sf = st_as_sf(pc_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS)
-visit_sf = st_as_sf(visit, coords = c("longitude", "latitude"), crs = UTM_CRS)
+aru_sf = st_as_sf(aru_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS) %>%
+  mutate(longitude = st_coordinates(.)[, 1],
+         latitude = st_coordinates(.)[, 2])
+pc_sf = st_as_sf(pc_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS) %>%
+  mutate(longitude = st_coordinates(.)[, 1],
+         latitude = st_coordinates(.)[, 2])
+visit_sf = st_as_sf(visit, coords = c("longitude", "latitude"), crs = UTM_CRS) %>%
+  mutate(longitude = st_coordinates(.)[, 1],
+         latitude = st_coordinates(.)[, 2])
 
 ## write to duckdb databases - for QPAD and for models ----
 

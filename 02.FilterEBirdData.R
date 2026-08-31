@@ -183,7 +183,7 @@ ebd.raw <- rbindlist(list(ebd.ca, ebd.mx, ebd.us))
 rm(ebd.ca, ebd.mx, ebd.us)
 
 #4.2. Species lookup ----
-spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-07-10.csv"))
+spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-08-26.csv"))
 
 #take out duplicates of scientific name
 dup <- c("GRAJ", "CORBRA", "MEGU", "PICHUD", "ANSROS", "PSFL")
