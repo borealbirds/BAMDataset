@@ -146,20 +146,29 @@ wt_replace_tmtt <- function(data, calc = "round") {
       -pred
     )
   }
-  
-  dat.tmtt = dat.tmtt %>%
-    mutate(abundance = case_when(abundance %in% c("TMTT", "TNPE") ~ NA_real_,
-                                 .default = as.numeric(abundance))) %>%
+
+  dat.tmtt <- dat.tmtt %>%
+    mutate(
+      abundance = case_when(
+        abundance %in% c("TMTT", "TNPE") ~ NA_real_,
+        .default = as.numeric(abundance)
+      )
+    ) %>%
     dplyr::select(-id)
-  
+
   return(dat.tmtt)
 }
 
 # WILDTRAX DATA WRANGLING #################
 
 #1. Get the downloaded data object ----
-db_conn_path = file.path(root, "WildTrax", v.wt, paste0("01_wildtrax_raw_", v.wt, ".duckdb"))
-db_conn = dbConnect(duckdb(db_conn_path))
+db_conn_path <- file.path(
+  root,
+  "WildTrax",
+  v.wt,
+  paste0("01_wildtrax_raw_", v.wt, ".duckdb")
+)
+db_conn <- dbConnect(duckdb(db_conn_path))
 
 bad_tasks <- read_xlsx(file.path(
   root,
@@ -200,12 +209,18 @@ MIN_Q999_OBSERVATIONS <- 1000
 
 timeofday_cov <- cov_tod_bin("timeofday")
 
-aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>% 
+aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   # add lat and lon as columns so they're not just in geometries
-  mutate(longitude = st_coordinates(.)[, 1], 
-         latitude = st_coordinates(.)[, 2],
-         location = as.character(location),
-         recording_date_time = as.POSIXct(recording_date_time, format = "%Y-%m-%d %H:%M:%OS", tz = "UTC")) %>% 
+  mutate(
+    longitude = st_coordinates(.)[, 1],
+    latitude = st_coordinates(.)[, 2],
+    location = as.character(location),
+    recording_date_time = as.POSIXct(
+      recording_date_time,
+      format = "%Y-%m-%d %H:%M:%OS",
+      tz = "UTC"
+    )
+  ) %>%
   # drop geometry for now
   st_drop_geometry %>%
   # remove non-birds
@@ -307,7 +322,7 @@ aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   ) %>%
   collect
 
-aru.tidy = aru_qpad_ready |>
+aru.tidy <- aru_qpad_ready |>
   group_by(
     data_source,
     sensor,
@@ -339,11 +354,17 @@ aru.tidy = aru_qpad_ready |>
 
 pc_qpad_ready <- ddbs_read_table(db_conn, "pc") %>%
   # add lat and lon as columns so they're not just in geometries
-  mutate(longitude = st_coordinates(.)[, 1], 
-         latitude = st_coordinates(.)[, 2],
-         location = as.character(location),
-         survey_date_time = as.POSIXct(survey_date_time, format = "%Y-%m-%d %H:%M:%OS", tz = "UTC"),
-         survey_date = survey_date_time) %>% 
+  mutate(
+    longitude = st_coordinates(.)[, 1],
+    latitude = st_coordinates(.)[, 2],
+    location = as.character(location),
+    survey_date_time = as.POSIXct(
+      survey_date_time,
+      format = "%Y-%m-%d %H:%M:%OS",
+      tz = "UTC"
+    ),
+    survey_date = survey_date_time
+  ) %>%
   # drop geometry for now
   st_drop_geometry %>%
   # remove non-birds
@@ -395,7 +416,7 @@ pc_qpad_ready <- ddbs_read_table(db_conn, "pc") %>%
   rename(date_time = survey_date_time, abundance = abundance) %>%
   collect
 
-pc.tidy = pc_qpad_ready %>%
+pc.tidy <- pc_qpad_ready %>%
   group_by(
     organization,
     project_id,
@@ -503,7 +524,7 @@ wt.tidy <- list(aru.tidy, pc.tidy) |>
 
 #EBIRD DATA WRANGLING #################
 
-ebd.unique = fread(file.path(
+ebd.unique <- fread(file.path(
   root,
   "eBird",
   v.ebd,
@@ -536,7 +557,13 @@ spp_use <- wildrtrax::wt_get_species() |>
 # convert the observations from local time to actual UTC.
 # Observations reported as "X" are conservatively assigned a count of one.
 ebd.tidy <- ebd.unique %>%
-  mutate(number_observers = ifelse("number_observers" %notin% names(.), 1, number_observers)) %>%
+  mutate(
+    number_observers = ifelse(
+      "number_observers" %notin% names(.),
+      1,
+      number_observers
+    )
+  ) %>%
   dplyr::filter(
     # only include non-hotspots because hotspots are often defined at spatially imprecise locations
     locality_type != "H",
@@ -669,7 +696,7 @@ nrow(survey_species_issues)
 #2. Split into visit and bird tables ----
 
 # One row per survey, containing only survey-level metadata and flags. When an eBird checklist group has multiple metadata variants, retain the variant represented by the most species. The remaining fields provide deterministic tie-breakers.
-visit <- all.tidy |>
+visit_core <- all.tidy |>
   dplyr::select(-count) |>
   group_by(across(-species)) |>
   summarize(n_species = n(), .groups = "drop") |>
@@ -714,6 +741,66 @@ visit <- all.tidy |>
   ungroup() |>
   arrange(survey_id) |>
   dplyr::select(-starts_with(".dup_"))
+
+# Mark visits within common study regions. Perform each spatial predicate once
+# per distinct location, rather than once per visit, and transform the points
+# to each region's native CRS. The model-region layer contains separate BCR
+# polygons, so dissolve it before testing point membership.
+model_region <- st_read(
+  file.path(root, "regions", "model", "BAM_BCRNMv5_3978.shp"),
+  quiet = TRUE
+) |>
+  st_geometry() |>
+  st_union()
+
+canada_region <- st_read(
+  file.path(root, "regions", "Canada", "CAN_adm0.shp"),
+  quiet = TRUE
+) |>
+  st_geometry()
+
+repair_invalid <- function(region) {
+  geometry_is_valid <- st_is_valid(region)
+  rbind(
+    region[geometry_is_valid, ],
+    st_make_valid(region[!geometry_is_valid, ])
+  )
+}
+
+boreal_region <- st_read(
+  file.path(root, "regions", "boreal", "NABoreal.shp"),
+  quiet = TRUE
+) |>
+  repair_invalid() |>
+  st_geometry() |>
+  st_union()
+
+visit_locations_sf <- visit_core |>
+  dplyr::distinct(longitude, latitude) |>
+  st_as_sf(
+    coords = c("longitude", "latitude"),
+    crs = 4326,
+    remove = FALSE
+  )
+
+inside_region <- function(points, region) {
+  transformed_points <- st_transform(points, st_crs(region))
+  lengths(st_intersects(transformed_points, region, prepared = TRUE)) > 0
+}
+
+visit_locations <- visit_locations_sf |>
+  mutate(
+    in_modelregion = inside_region(visit_locations_sf, model_region),
+    in_Canada = inside_region(visit_locations_sf, canada_region),
+    in_boreal = inside_region(visit_locations_sf, boreal_region)
+  ) |>
+  st_drop_geometry()
+
+visit <- visit_core |>
+  left_join(
+    visit_locations,
+    by = c("longitude", "latitude")
+  )
 
 # One row per survey and species, containing only bird detections. The
 # flag_err_count field applies only to that species detection and is therefore
@@ -787,6 +874,17 @@ visit_flag_issues <- visit |>
   )
 nrow(visit_flag_issues)
 
+# Every visit should receive a value for each spatial membership field. Output
+# object should have zero rows.
+spatial_membership_issues <- visit |>
+  dplyr::filter(
+    if_any(
+      all_of(c("in_modelregion", "in_Canada", "in_boreal")),
+      is.na
+    )
+  )
+nrow(spatial_membership_issues)
+
 # Bird values and count flags should be complete and valid. Output object should have zero rows.
 bird_value_issues <- bird |>
   dplyr::filter(
@@ -808,6 +906,7 @@ output_check_summary <- tibble(
     "bird key",
     "bird-to-visit link",
     "visit flags",
+    "spatial membership",
     "bird values"
   ),
   n_issues = c(
@@ -817,6 +916,7 @@ output_check_summary <- tibble(
     nrow(bird_key_issues),
     nrow(bird_visit_issues),
     nrow(visit_flag_issues),
+    nrow(spatial_membership_issues),
     nrow(bird_value_issues)
   )
 )
@@ -904,22 +1004,37 @@ count_limits <- bird |>
 
 #5. Save ----
 
-UTM_CRS = 4326
+UTM_CRS <- 4326
 
-aru_sf = st_as_sf(aru_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS) %>%
-  mutate(longitude = st_coordinates(.)[, 1],
-         latitude = st_coordinates(.)[, 2])
-pc_sf = st_as_sf(pc_qpad_ready, coords = c("longitude", "latitude"), crs = UTM_CRS) %>%
-  mutate(longitude = st_coordinates(.)[, 1],
-         latitude = st_coordinates(.)[, 2])
-visit_sf = st_as_sf(visit, coords = c("longitude", "latitude"), crs = UTM_CRS) %>%
-  mutate(longitude = st_coordinates(.)[, 1],
-         latitude = st_coordinates(.)[, 2])
+aru_sf <- st_as_sf(
+  aru_qpad_ready,
+  coords = c("longitude", "latitude"),
+  crs = UTM_CRS
+) %>%
+  mutate(longitude = st_coordinates(.)[, 1], latitude = st_coordinates(.)[, 2])
+pc_sf <- st_as_sf(
+  pc_qpad_ready,
+  coords = c("longitude", "latitude"),
+  crs = UTM_CRS
+) %>%
+  mutate(longitude = st_coordinates(.)[, 1], latitude = st_coordinates(.)[, 2])
+visit_sf <- st_as_sf(
+  visit,
+  coords = c("longitude", "latitude"),
+  crs = UTM_CRS
+) %>%
+  mutate(longitude = st_coordinates(.)[, 1], latitude = st_coordinates(.)[, 2])
 
 ## write to duckdb databases - for QPAD and for models ----
 
-db_conn_path_qpad = file.path(root, paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb"))
-db_conn_path_models = file.path(root, paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb"))
+db_conn_path_qpad <- file.path(
+  root,
+  paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
+)
+db_conn_path_models <- file.path(
+  root,
+  paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
+)
 
 ### qpad first! ----
 
@@ -927,7 +1042,7 @@ db_conn_path_models = file.path(root, paste0("03_BAMDataset_WT-", v.wt, "_EBd-",
 ddbs_write_dataset(aru_sf, db_conn_path_qpad, layer = "aru", overwrite = TRUE)
 
 # re-load connection to be able to add more data
-db_conn_qpad = dbConnect(duckdb(db_conn_path_qpad))
+db_conn_qpad <- dbConnect(duckdb(db_conn_path_qpad))
 dbExecute(db_conn_qpad, "LOAD spatial") # have to do this for whatever reason
 
 # write the other file
@@ -936,13 +1051,22 @@ ddbs_write_table(db_conn_qpad, pc_sf, name = "pc", overwrite = TRUE)
 ### now for the models ----
 
 # make connection
-ddbs_write_dataset(visit_sf, db_conn_path_models, layer = "visit", overwrite = TRUE)
+ddbs_write_dataset(
+  visit_sf,
+  db_conn_path_models,
+  layer = "visit",
+  overwrite = TRUE
+)
 
 # re-load connection to be able to add more data
-db_conn_models = dbConnect(duckdb(db_conn_path_models))
+db_conn_models <- dbConnect(duckdb(db_conn_path_models))
 dbExecute(db_conn_models, "LOAD spatial") # have to do this for whatever reason
 
 # write the other files
 dbWriteTable(db_conn_models, name = "bird", bird)
 dbWriteTable(db_conn_models, name = "count_limits", count_limits)
-dbWriteTable(db_conn_models, name = "output_check_summary", output_check_summary)
+dbWriteTable(
+  db_conn_models,
+  name = "output_check_summary",
+  output_check_summary
+)
