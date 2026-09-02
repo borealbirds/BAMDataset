@@ -17,10 +17,9 @@
 #1. Load packages----
 library(DBI) #read the BAMDataset DuckDB
 library(duckdb) #connect to the BAMDataset DuckDB
-library(devtools) #load the development version of CovariateExtraction
+library(CovariateExtraction) #build and run covariate extraction jobs
 
-#Load the package directly from the neighbouring repository while it is under development
-devtools::load_all(file.path("..", "CovariateExtraction"))
+#Install or update the package separately with devtools::install_github("borealbirds/CovariateExtraction")
 
 #2. Set root paths----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
@@ -119,6 +118,8 @@ range(surveys$survey_year)
 head(surveys)
 
 #CANLAD EXTRACTION TABLE##############
+
+#NOTE: This will get replaced by a table that's built outside of R when we expand to more than just one test dataset
 
 #1. Build one extraction row for each annual raster----
 #Relative paths are resolved against spatial.root by build_jobs()
