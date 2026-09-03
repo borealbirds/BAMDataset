@@ -19,10 +19,10 @@ library(DBI) #read the BAMDataset DuckDB
 library(duckdb) #connect to the BAMDataset DuckDB
 library(CovariateExtraction) #build and run covariate extraction jobs
 
-#This script requires CovariateExtraction 0.3.0 or later
-if (utils::packageVersion("CovariateExtraction") < "0.3.0") {
+#This script requires CovariateExtraction 0.3.1 or later
+if (utils::packageVersion("CovariateExtraction") < "0.3.1") {
   stop(
-    "CovariateExtraction 0.3.0 or later is required. ",
+    "CovariateExtraction 0.3.1 or later is required. ",
     "Restart R after installing the current package version."
   )
 }
@@ -137,6 +137,7 @@ extraction.table <- data.frame(
     "canlad_annual_{year}_v1_1_20260508.tif"
   ),
   output_name = "canlad_class",
+  description = "Annual CanLaD disturbance class at the survey location",
   statistic = "value",
   buffer_m = 0,
   band = 1,
