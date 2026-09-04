@@ -1065,8 +1065,4 @@ dbExecute(db_conn_models, "LOAD spatial") # have to do this for whatever reason
 # write the other files
 dbWriteTable(db_conn_models, name = "bird", bird)
 dbWriteTable(db_conn_models, name = "count_limits", count_limits)
-dbWriteTable(
-  db_conn_models,
-  name = "output_check_summary",
-  output_check_summary
-)
+dbWriteTable(db_conn_models, name = "output_check_summary", output_check_summary)
