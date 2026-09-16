@@ -4,12 +4,14 @@
 # raster_path: character representing the file path (including file name and extension) of the raster containing information about the covariates
 # fun_app: function to apply to results
 # cov_scale: numeric > 0; scale factor to apply to results BEFORE fun_app is called
+# na_in_domain: logical; if TRUE, builds domain (more quickly) based on raster extent and may include NA values or even corners that aren't actually in the raster
 #
 # Returns a covariate generating object with three elements: "name" (the name of the covariate), "domain" (SpatVector showing where the covariate is defined), and "get" (function for getting covariate values)
 cov_static_raster = function(cov_name, 
                              raster_path,
                              fun_app = function(x) {x},
-                             cov_scale = 1) {
+                             cov_scale = 1,
+                             na_in_domain = FALSE) {
   
   r = rast(raster_path)
   
@@ -18,8 +20,14 @@ cov_static_raster = function(cov_name,
     fun_app(cov_scale * terra::extract(r, v, ID = FALSE)[, 1])
   }
   
+  if (na_in_domain) {
+    domain = as.polygons(ext(r), crs = crs(r))
+  } else {
+    domain = as.polygons(r * 0, values = FALSE)
+  }
+  
   list(name = cov_name,
-       domain = as.polygons(r * 0, values = FALSE),
+       domain = domain,
        get = gfun)
   
 }

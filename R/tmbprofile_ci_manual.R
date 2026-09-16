@@ -8,7 +8,7 @@
 # h_final: how close do we want to get to the actual lower bound value?
 # start_adapt: during each optimization, do we change the initial guess to the optimal non-focal parameters from the previous optimization? This can help speed up each optimization but can also potentially drag the result out of its local minimum and then the algorithm will not work
 # max_iter: after how many iterations should we stop looking (even if the algorithm has not converged; prevents infinite loops for messy functions with huge confidence intervals)
-# opt_method: optimization method; currently only "nlminb", "L-BFGS-B", "bobyqa" are allowed
+# opt_method: optimization method; currently only "nlminb", "L-BFGS-B", "bobyqa", "Nelder-Mead" are allowed
 # verbose: integer greater than or equal to 0; how much information to provide while the algorithm is running? 0 does nothing; 1 (default) prints beginning of lower and upper for each parameter; 2 prints everything in 1 plus values of focal parameter; 3 prints everything from 2 plus gradient values
 #
 # Returns a list of data.frames with all the profiles that can easily be converted to a data.frame with confidence intervals using prof_ci_df() below
@@ -20,18 +20,21 @@ tmbprofile_ci_manual = function(obj,
                                 h_final = 1e-4,
                                 start_adapt = TRUE,
                                 max_iter = 50,
-                                opt_method = c("nlminb", "BFGS", "bobyqa"),
+                                opt_method = c("nlminb", "BFGS", "bobyqa", "Nelder-Mead"),
                                 verbose = 1) {
   
   require(foreach)
   require(doParallel)
   
   opt_method = match.arg(opt_method)
+  n_pars = length(obj$par)
   
   fit_fun = function(par, fn, gr, ...) {
-    if (opt_method == "nlminb") return(nlminb(par, fn, gr, control = list(eval.max = 1e4, iter.max = 1e4), ...))
+    if (n_pars == 1) return(list(par = par, value = fn()))
+    if (opt_method == "nlminb" || (opt_method %in% c("BFGS") && n_pars == 2)) return(nlminb(par, fn, gr, control = list(eval.max = 1e4, iter.max = 1e4), ...))
+    if (opt_method == "bobyqa" || (opt_method %in% c("Nelder-Mead") && n_pars == 2)) return(nloptr::bobyqa(par, fn, control = list(maxeval = 1e4), ...))
     if (opt_method == "BFGS") return(optim(par, fn, gr, method = "BFGS", control = list(maxit = 1e4), ...))
-    if (opt_method == "bobyqa") return(nloptr::bobyqa(par, fn, control = list(maxeval = 1e4), ...))
+    if (opt_method == "Nelder-Mead") return(optim(par, obj$fn, method = "Nelder-Mead", control = list(maxit = iter_max)))
   }
   
   # TO DO: All of this might not work for random effects
@@ -49,7 +52,7 @@ tmbprofile_ci_manual = function(obj,
     `%doint%` = `%do%`
   }
   
-  I_PAR = diag(length(obj$par))
+  I_PAR = diag(n_pars)
   if (is.null(obj$env$random)) {
     OPTIMAL_PARS = obj$env$last.par.best
   } else {
@@ -65,10 +68,12 @@ tmbprofile_ci_manual = function(obj,
     
     # Generate new versions of the function and gradient that take 1 less parameter
     new_fn = function(par, pf = OPTIMAL_PARS[i]) {
+      if (n_pars == 1) return(obj$fn(pf))
       obj$fn(par %*% I_PAR[-i, ] + pf %*% I_PAR[i, ])
     }
     
     new_gr = function(par, pf = OPTIMAL_PARS[i]) {
+      if (n_pars == 1) return(obj$gr(pf))
       obj$gr(par %*% I_PAR[-i, ] + pf %*% I_PAR[i, ]) %*% I_PAR[, -i]
     }
     

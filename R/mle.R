@@ -1,18 +1,19 @@
 # Optimization function that attempts to reduce the likelihood of ending up in local optima by re-running the profiling algorithm
 #
 # obj: RTMB model object
-# method: optimization method; currently only "nlminb", "L-BFGS-B", "bobyqa" are allowed
+# method: optimization method; currently only "nlminb", "L-BFGS-B", "bobyqa", "Nelder-Mead" are allowed
 # verbose: extent of print output provided. If 0, nothing at all, if 1, minimal output, if 2, prints parameters for every function call, also see tmbprofile_ci_manual which receives this argument
 # profile_max: integer > 0; number of times to profile before stopping
 # profile_improve_stop: numeric >= 0; how much better does the new likelihood value have to be to keep going?
 # eval_max: integer > 0; number of function evaluations allowed during each optimization, passed to internal model fitting functions
 # iter_max: integer > 0; number of algorithm iterations allowed during each optimization (NOT for the overall fitting algorithm)
 # return_ci: logical; if TRUE, returns a table with confidence intervals
+# ...: additional arguments to tmbprofile_ci_manual
 #
 # Returns a model fit from nlminb() or some other function (see "method")
 mle = function(obj,
                init_par = obj$par,
-               method = c("nlminb", "BFGS", "bobyqa"),
+               method = c("nlminb", "BFGS", "bobyqa", "Nelder-Mead"),
                verbose = 0,
                profile_max = 10,
                profile_improve_stop = 0,
@@ -34,6 +35,7 @@ mle = function(obj,
   fit_fun = function(par) {
     if (method == "nlminb") return(nlminb(par, obj$fn, obj$gr, control = list(eval.max = eval_max, iter.max = iter_max)))
     if (method == "BFGS") return(optim(par, obj$fn, obj$gr, method = "BFGS", control = list(maxit = iter_max)))
+    if (method == "Nelder-Mead") return(optim(par, obj$fn, method = "Nelder-Mead", control = list(maxit = iter_max)))
     if (method == "bobyqa") return(nloptr::bobyqa(par, obj$fn, control = list(maxeval = eval_max)))
   }
   
@@ -52,7 +54,7 @@ mle = function(obj,
     n_profile = n_profile + 1
     best_value = obj$fn(obj$env$last.par.best)
     if (verbose > 0) message("beginning profile number ", n_profile)
-    pr = tmbprofile_ci_manual(obj, verbose = verbose, opt_method = method)
+    pr = tmbprofile_ci_manual(obj, verbose = verbose, opt_method = method, ...)
     
     # Compare "best_value" (the old MLE) to whatever the new best value is according to the function. If it's better, we run the profile again to see if we can further determine new optima.
     new_best_value = obj$fn(obj$env$last.par.best)
@@ -69,7 +71,7 @@ mle = function(obj,
     # if possible, we don't want to rerun the profile because it can be slow. if the function value at the optimum is similar to the best value identified by the final optimization, we just use the last profile from the algorithm above. if there is no profile, we run one.
     rerun_profile = is(try(pr), "try-error") || (obj$fn(obj$env$last.par.best) < (pr[[1]]$cur_nll[1] - profile_improve_stop))
     if (rerun_profile) {
-      pr = tmbprofile_ci_manual(obj, verbose = verbose, opt_method = method)
+      pr = tmbprofile_ci_manual(obj, verbose = verbose, opt_method = method, ...)
     }
     
     # convert to table and replace the "est" column with the actual MLE in case they differ

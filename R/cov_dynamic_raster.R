@@ -25,6 +25,12 @@ cov_dynamic_raster = function(cov_name,
   raster_files_dates_only = list.files(raster_dir, pattern = "\\.tif") %>% str_split_i(".tif", 1)
   raster_files_dates_pos = as.POSIXct(raster_files_dates_only, format = by)
   
+  # remove files with NA dates
+  files_keep = !is.na(raster_files_dates_pos)
+  raster_files = raster_files[files_keep]
+  raster_files_dates_only = raster_files_dates_only[files_keep]
+  raster_files_dates_pos = raster_files_dates_pos[files_keep]
+  
   all_rasters = lapply(raster_files, rast)
   all_crs_values = sapply(all_rasters, crs)
   all_file_polygons = lapply(all_rasters, function(r) vect(ext(r), crs = crs(r)))

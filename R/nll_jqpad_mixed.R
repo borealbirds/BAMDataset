@@ -201,6 +201,8 @@ fit_jqpadmix = function(data_in,
                         return_hess = FALSE,
                         ...) {
   
+  require(RTMB)
+  
   terms_lambda = terms(formula_lambda)
   terms_alpha = terms(formula_alpha)
   
