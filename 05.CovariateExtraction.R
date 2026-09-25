@@ -21,18 +21,18 @@
 #1. Load packages----
 library(DBI) #read the BAMDataset DuckDB
 library(duckdb) #connect to the BAMDataset DuckDB
-library(CovariateExtraction) #build and run covariate extraction jobs
+library(BAMCovariates) #build and run covariate extraction jobs
 
-#This script requires CovariateExtraction 0.4.0 or later for assets.csv support
-if (utils::packageVersion("CovariateExtraction") < "0.4.0") {
+#This script requires BAMCovariates 0.4.0 or later for assets.csv support
+if (utils::packageVersion("BAMCovariates") < "0.4.0") {
   stop(
-    "CovariateExtraction 0.4.0 or later is required. ",
+    "BAMCovariates 0.4.0 or later is required. ",
     "Restart R after installing the current package version."
   )
 }
 
-#Install a published update with devtools::install_github("borealbirds/CovariateExtraction")
-#During local development use devtools::install("C:/Users/elly/Documents/BAM/Data/CovariateExtraction")
+#Install a published update with devtools::install_github("borealbirds/BAMCovariates")
+#During local development use devtools::install("<path-to-local-BAMCovariates-clone>")
 
 #2. Set root paths----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
