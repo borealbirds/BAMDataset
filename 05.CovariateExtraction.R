@@ -6,11 +6,15 @@
 
 #NOTES################################
 
-#PURPOSE: This script tests the CovariateExtraction package by extracting the annual CanLaD disturbance class at each Canadian survey point. Survey year is matched to raster year, so (for example) a Canadian survey conducted in 2020 is extracted only from the 2020 CanLaD raster.
+#PURPOSE: This script extracts point-level covariates from the master BAMSpatialData asset catalogue. It includes annual CanLaD disturbance class, the static NTEMS wildfire dNBR product, and SCANFI biomass, age, and land cover. CanLaD is matched to the survey year; SCANFI uses the nearest available five-year layer.
 
-#Covariates are kept in the R session, checked, and then written as one table named covariate in a new version of the BAMDataset DuckDB. No manifests, RDS files, or standalone CSV outputs are created.
+#Covariates are kept in the R session, checked, and then optionally written as
+#one table named covariate in the same BAMDataset DuckDB used to read visits.
+#Existing database tables are left unchanged. No manifests, RDS files, or
+#standalone CSV outputs are created.
 
-#The script defaults to 1,000 surveys and does not write a database. Review the test result before enabling the full extraction and database write.
+#The current settings run the complete extraction and write the covariate table.
+#For a trial run, set test.run to TRUE and write.covariate.table to FALSE.
 
 #PREAMBLE############################
 
@@ -19,10 +23,10 @@ library(DBI) #read the BAMDataset DuckDB
 library(duckdb) #connect to the BAMDataset DuckDB
 library(CovariateExtraction) #build and run covariate extraction jobs
 
-#This script requires CovariateExtraction 0.3.1 or later
-if (utils::packageVersion("CovariateExtraction") < "0.3.1") {
+#This script requires CovariateExtraction 0.4.0 or later for assets.csv support
+if (utils::packageVersion("CovariateExtraction") < "0.4.0") {
   stop(
-    "CovariateExtraction 0.3.1 or later is required. ",
+    "CovariateExtraction 0.4.0 or later is required. ",
     "Restart R after installing the current package version."
   )
 }
@@ -34,27 +38,38 @@ if (utils::packageVersion("CovariateExtraction") < "0.3.1") {
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 spatial.root <- "G:/Shared drives/BAM_SpatialData"
 
+#Locate the BAMSpatialData catalogue independently of the current R working
+#directory. This default allows Windows usernames to differ among computers.
+#Set BAM_SPATIAL_CATALOG before running if the repository is cloned elsewhere.
+spatial.catalog.path <- Sys.getenv(
+  "BAM_SPATIAL_CATALOG",
+  unset = file.path(
+    Sys.getenv("USERPROFILE"),
+    "Documents",
+    "BAM",
+    "Data",
+    "BAMSpatialData",
+    "assets.csv"
+  )
+)
+
 #3. Set the BAMDataset versions----
 v.wt <- "2026-08-26"
 v.ebd <- "Jun-2026"
 
-#4. Set the CanLaD version----
-v.canlad <- "v1.1_20260508"
-canlad.folder <- "TS_FinalFilter_20260508"
-
-#5. Choose whether to run a small test or the complete dataset----
+#4. Choose whether to run a small test or the complete dataset----
 #Leave test.run as TRUE until the first extraction has been checked
 test.run <- FALSE
 test.n.surveys <- 1000
 
-#6. Choose whether to write the new DuckDB----
+#5. Choose whether to write the covariate table----
 #Keep this FALSE while test.run is TRUE. The extraction remains in the covariates object.
-write.database <- FALSE
+write.covariate.table <- TRUE
 
-#Keep this FALSE to protect an existing 05_ database
-overwrite.database <- FALSE
+#Keep this FALSE to protect an existing covariate table
+overwrite.covariate.table <- FALSE
 
-#7. Set job size----
+#6. Set job size----
 #The full workflow can start with 50,000 surveys per job; reduce this if a job uses too much memory
 chunk.size <- if (test.run) test.n.surveys else 50000
 
@@ -70,11 +85,17 @@ if (!file.exists(database.path)) {
   stop("BAMDataset DuckDB does not exist: ", database.path)
 }
 
-#2. Set the new BAMDataset path----
-#The source database is copied before the covariate table is added, leaving the 03_ database unchanged
-output.database.path <- file.path(
-  root,
-  paste0("05_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
+#2. Locate the master spatial asset catalogue----
+if (!file.exists(spatial.catalog.path)) {
+  stop(
+    "BAMSpatialData assets.csv does not exist: ",
+    spatial.catalog.path
+  )
+}
+spatial.catalog.path <- normalizePath(
+  spatial.catalog.path,
+  winslash = "/",
+  mustWork = TRUE
 )
 
 #SURVEYS#############################
@@ -87,7 +108,9 @@ database.connection <- dbConnect(
 )
 
 #2. Read one row per survey----
-#Extract only the fields required by the package. The date filter excludes surveys outside the years supplied by this CanLaD release.
+#Extract the fields required by the package without filtering on the spatial
+#extent. The extraction table below applies in_Canada only while reading raster
+#values, so the source BAMDataset itself retains all surveys.
 survey.query <- paste(
   "SELECT",
   "  survey_id,",
@@ -119,45 +142,60 @@ nrow(surveys)
 range(surveys$survey_year)
 head(surveys)
 
-#CANLAD EXTRACTION TABLE##############
+#COVARIATE EXTRACTION TABLE##############
 
-#NOTE: This will get replaced by a table that's built outside of R when we expand to more than just one test dataset
-
-#1. Describe the complete annual raster series with one row----
-#Relative paths are resolved against spatial.root by extract_covariates()
-extraction.table <- data.frame(
-  enabled = TRUE,
-  category = "Disturbance",
-  covariate_id = "canlad_annual_class",
-  raster_path = file.path(
-    "raw",
-    "canlad",
-    v.canlad,
-    canlad.folder,
-    "canlad_annual_{year}_v1_1_20260508.tif"
-  ),
-  output_name = "canlad_class",
-  description = "Annual CanLaD disturbance class at the survey location",
-  statistic = "value",
-  buffer_m = 0,
-  band = 1,
-  year_offset = 0,
-  temporal_match = "annual",
-  filter_column = "in_Canada",
-  na_action = "keep",
-  fill_value = NA_real_,
-  value_type = "categorical",
-  units = "CanLaD class",
-  notes = "Annual CanLaD disturbance class extracted at Canadian survey points",
-  stringsAsFactors = FALSE
+#1. Select logical raster series from the master asset catalogue----
+#The package collapses all physical year files into one extraction row per
+#series. Only assets registered as ready by their download scripts are used.
+selected.asset.series <- c(
+  "canlad_annual_class",
+  "ntems_wildfire_dnbr",
+  "scanfi_biomass",
+  "scanfi_age",
+  "scanfi_nfi_landcover"
 )
 
-#2. Inspect the extraction specification----
+extraction.table <- create_extraction_table(
+  assets = spatial.catalog.path,
+  asset_series_ids = selected.asset.series
+)
+
+#2. Configure every selected series as a point-level extraction----
+#create_extraction_table() deliberately returns disabled point-extraction rows.
+#Enable them here and give the DuckDB columns concise, stable names.
+extraction.table$enabled <- TRUE
+extraction.table$statistic <- "value"
+extraction.table$buffer_m <- 0
+
+#Enforce the Canadian extent in the extraction specification as well as in the
+#DuckDB query. This protects the workflow if its survey query is changed later.
+extraction.table$filter_column <- "in_Canada"
+
+output.names <- c(
+  canlad_annual_class = "canlad_class",
+  ntems_wildfire_dnbr = "wildfire_dnbr_1985_2022",
+  scanfi_biomass = "scanfi_biomass",
+  scanfi_age = "scanfi_age",
+  scanfi_nfi_landcover = "scanfi_landcover"
+)
+extraction.table$output_name <- unname(
+  output.names[extraction.table$asset_series_id]
+)
+
+if (
+  anyNA(extraction.table$output_name) ||
+    !setequal(extraction.table$asset_series_id, selected.asset.series)
+) {
+  stop("The extraction table does not contain every requested asset series")
+}
+
+#3. Inspect the extraction specification----
+#CanLaD should be annual, SCANFI nearest, and wildfire dNBR static.
 extraction.table
 
 #EXTRACT##############################
 
-#1. Extract CanLaD values into the R session----
+#1. Extract all selected point values into the R session----
 #Survey coordinates are longitude/latitude (EPSG:4326). buffer_crs is retained for compatibility with future buffer extractions but is not used when buffer_m is zero.
 covariates <- extract_covariates(
   surveys = surveys,
@@ -168,69 +206,81 @@ covariates <- extract_covariates(
   chunk_size = chunk.size
 )
 
-#2. Check the single covariate table----
+#2. Check the combined covariate table----
 nrow(covariates)
 head(covariates)
 table(covariates$canlad_class, useNA = "ifany")
+table(covariates$scanfi_landcover, useNA = "ifany")
+summary(
+  covariates[c(
+    "wildfire_dnbr_1985_2022",
+    "scanfi_biomass",
+    "scanfi_age"
+  )]
+)
 
 if (anyDuplicated(covariates$survey_id)) {
   stop("The covariate table contains duplicate survey_id values")
 }
 
-#WRITE BAM DATASET####################
+#WRITE COVARIATE TABLE################
 
 #1. Protect the test workflow----
-#A test extraction should be inspected in the R session and never written into a versioned BAMDataset
-if (write.database && test.run) {
-  stop("Set test.run to FALSE before writing the new BAMDataset")
+#A test extraction should be inspected in the R session and not written to the
+#shared BAMDataset.
+if (write.covariate.table && test.run) {
+  stop("Set test.run to FALSE before writing the covariate table")
 }
 
-#2. Copy the existing BAMDataset----
-#This creates a complete 05_ database while preserving the existing 03_ database
-if (write.database) {
-  if (file.exists(output.database.path) && !overwrite.database) {
-    stop(
-      "Output database already exists: ",
-      output.database.path,
-      "\nSet overwrite.database to TRUE only when replacement is intended."
-    )
-  }
-
-  database.copied <- file.copy(
-    from = database.path,
-    to = output.database.path,
-    overwrite = overwrite.database
-  )
-
-  if (!database.copied) {
-    stop("Could not copy the BAMDataset to: ", output.database.path)
-  }
-
-  #3. Add the covariate table to the new database----
-  output.database.connection <- dbConnect(
+#2. Reconnect to the existing BAMDataset with write access----
+if (write.covariate.table) {
+  database.connection <- dbConnect(
     duckdb(),
-    dbdir = output.database.path
+    dbdir = database.path,
+    read_only = FALSE
   )
 
-  dbWriteTable(
-    output.database.connection,
-    name = "covariate",
-    value = covariates,
-    overwrite = TRUE
+  tryCatch(
+    {
+      #3. Protect or replace an existing covariate table----
+      table.exists <- dbExistsTable(database.connection, "covariate")
+      if (table.exists && !overwrite.covariate.table) {
+        stop(
+          "The covariate table already exists in: ",
+          database.path,
+          "\nSet overwrite.covariate.table to TRUE only when replacement ",
+          "is intended."
+        )
+      }
+
+      #4. Write within a transaction----
+      #If writing fails, DuckDB rolls the transaction back and retains the
+      #previous database state.
+      dbWithTransaction(
+        database.connection,
+        dbWriteTable(
+          database.connection,
+          name = "covariate",
+          value = covariates,
+          overwrite = overwrite.covariate.table
+        )
+      )
+
+      #5. Verify the completed table----
+      written.rows <- dbGetQuery(
+        database.connection,
+        "SELECT COUNT(*) AS n FROM covariate"
+      )$n[[1]]
+
+      if (written.rows != nrow(covariates)) {
+        stop("The number of rows written to the covariate table is incorrect")
+      }
+
+      message("Added covariate table to BAMDataset: ", database.path)
+      message("Rows written to covariate table: ", written.rows)
+    },
+    finally = {
+      dbDisconnect(database.connection, shutdown = TRUE)
+    }
   )
-
-  #4. Verify and close the new database----
-  written.rows <- dbGetQuery(
-    output.database.connection,
-    "SELECT COUNT(*) AS n FROM covariate"
-  )$n[[1]]
-
-  dbDisconnect(output.database.connection, shutdown = TRUE)
-
-  if (written.rows != nrow(covariates)) {
-    stop("The number of rows written to the covariate table is incorrect")
-  }
-
-  message("Created BAMDataset: ", output.database.path)
-  message("Rows written to covariate table: ", written.rows)
 }
