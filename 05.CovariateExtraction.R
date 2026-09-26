@@ -2,54 +2,64 @@
 # title: BAM dataset - extract covariates
 # author: Elly Knight
 # created: September 2, 2026
+# updated: September 26, 2026
 # ---
 
 #NOTES################################
 
-#PURPOSE: This script extracts point-level covariates from the master BAMSpatialData asset catalogue. It includes annual CanLaD disturbance class, the static NTEMS wildfire dNBR product, and SCANFI biomass, age, and land cover. CanLaD is matched to the survey year; SCANFI uses the nearest available five-year layer.
+#PURPOSE: This script extracts point-level covariates using the committed
+#05.CovariateExtractionTable.csv recipe. The initial recipe includes annual
+#CanLaD disturbance class, static NTEMS wildfire dNBR, and nearest-year SCANFI
+#biomass, age, and land cover.
 
-#Covariates are kept in the R session, checked, and then optionally written as
-#one table named covariate in the same BAMDataset DuckDB used to read visits.
-#Existing database tables are left unchanged. No manifests, RDS files, or
-#standalone CSV outputs are created.
+#All visits are retained in the final covariate table. Raster extraction is
+#limited by the recipe's in_Canada filter. Visits outside Canada or without
+#usable coordinates therefore remain in the table with missing new covariates.
 
-#The current settings run the complete extraction and write the covariate table.
-#For a trial run, set test.run to TRUE and write.covariate.table to FALSE.
+#If a covariate table already exists, its columns are supplied to
+#BAMCovariates. Existing columns are retained and only newly requested recipe
+#outputs are extracted. DuckDB does not preserve R attributes, so columns read
+#back from DuckDB are reported as unverified rather than provenance-verified.
+
+#No RDS, CSV, manifest, or standalone covariate output is created. The result
+#remains in the covariates object and can be written back to the same DuckDB.
 
 #PREAMBLE############################
 
 #1. Load packages----
-library(DBI) #read the BAMDataset DuckDB
+library(DBI) #read and update the BAMDataset DuckDB
 library(duckdb) #connect to the BAMDataset DuckDB
-library(BAMCovariates) #build and run covariate extraction jobs
+library(BAMCovariates) #validate recipes and extract covariates
 
-#This script requires BAMCovariates 0.4.0 or later for assets.csv support
-if (utils::packageVersion("BAMCovariates") < "0.4.0") {
+#This workflow uses the validation and incremental-extraction behavior added
+#in BAMCovariates 0.10.1.
+if (utils::packageVersion("BAMCovariates") < "0.10.1") {
   stop(
-    "BAMCovariates 0.4.0 or later is required. ",
+    "BAMCovariates 0.10.1 or later is required. ",
     "Restart R after installing the current package version."
   )
 }
 
-#Install a published update with devtools::install_github("borealbirds/BAMCovariates")
-#During local development use devtools::install("<path-to-local-BAMCovariates-clone>")
+#Install a published update with:
+#devtools::install_github("borealbirds/BAMCovariates")
+
+#During local package development use:
+#devtools::install("C:/Users/<username>/Documents/BAM/Data/BAMCovariates")
 
 #2. Set root paths----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 spatial.root <- "G:/Shared drives/BAM_SpatialData"
 
-#Locate the BAMSpatialData catalogue independently of the current R working
-#directory. This default allows Windows usernames to differ among computers.
-#Set BAM_SPATIAL_CATALOG before running if the repository is cloned elsewhere.
-spatial.catalog.path <- Sys.getenv(
-  "BAM_SPATIAL_CATALOG",
+#Locate this repository independently of the current R working directory.
+#Set BAM_DATASET_REPOSITORY before running if the repository is cloned elsewhere.
+repository.root <- Sys.getenv(
+  "BAM_DATASET_REPOSITORY",
   unset = file.path(
     Sys.getenv("USERPROFILE"),
     "Documents",
     "BAM",
     "Data",
-    "BAMSpatialData",
-    "assets.csv"
+    "BAMDataset"
   )
 )
 
@@ -58,19 +68,19 @@ v.wt <- "2026-08-26"
 v.ebd <- "Jun-2026"
 
 #4. Choose whether to run a small test or the complete dataset----
-#Leave test.run as TRUE until the first extraction has been checked
+#A test run reads only the first test.n.surveys visits, ignores any existing
+#covariate table, and cannot be written to the shared database.
 test.run <- FALSE
 test.n.surveys <- 1000
 
-#5. Choose whether to write the covariate table----
-#Keep this FALSE while test.run is TRUE. The extraction remains in the covariates object.
+#5. Choose whether to update the DuckDB covariate table----
+#Leave this FALSE until the covariates object has been inspected. When TRUE,
+#the script creates the covariate table or replaces it with the combined table.
 write.covariate.table <- TRUE
 
-#Keep this FALSE to protect an existing covariate table
-overwrite.covariate.table <- FALSE
-
-#6. Set job size----
-#The full workflow can start with 50,000 surveys per job; reduce this if a job uses too much memory
+#6. Set extraction chunk size----
+#Start with 50,000 surveys per chunk. Reduce this if extraction uses too much
+#memory. This is not the number of rows written to DuckDB at once.
 chunk.size <- if (test.run) test.n.surveys else 50000
 
 #PATHS###############################
@@ -85,18 +95,15 @@ if (!file.exists(database.path)) {
   stop("BAMDataset DuckDB does not exist: ", database.path)
 }
 
-#2. Locate the master spatial asset catalogue----
-if (!file.exists(spatial.catalog.path)) {
-  stop(
-    "BAMSpatialData assets.csv does not exist: ",
-    spatial.catalog.path
-  )
-}
-spatial.catalog.path <- normalizePath(
-  spatial.catalog.path,
-  winslash = "/",
-  mustWork = TRUE
+#2. Locate the committed extraction recipe----
+extraction.table.path <- file.path(
+  repository.root,
+  "05.CovariateExtractionTable.csv"
 )
+
+if (!file.exists(extraction.table.path)) {
+  stop("Covariate extraction table does not exist: ", extraction.table.path)
+}
 
 #SURVEYS#############################
 
@@ -107,10 +114,9 @@ database.connection <- dbConnect(
   read_only = TRUE
 )
 
-#2. Read one row per survey----
-#Extract the fields required by the package without filtering on the spatial
-#extent. The extraction table below applies in_Canada only while reading raster
-#values, so the source BAMDataset itself retains all surveys.
+#2. Read every survey without applying date or spatial filters----
+#Only the columns required for extraction are brought into R. In a test run,
+#LIMIT restricts this temporary trial; the complete run has no WHERE or LIMIT.
 survey.query <- paste(
   "SELECT",
   "  survey_id,",
@@ -118,116 +124,185 @@ survey.query <- paste(
   "  latitude,",
   "  in_Canada,",
   "  CAST(EXTRACT(YEAR FROM date_time) AS INTEGER) AS survey_year",
-  "FROM visit",
-  "WHERE date_time >= '1984-01-01'",
-  "  AND date_time < '2026-01-01'",
-  "  AND longitude IS NOT NULL",
-  "  AND latitude IS NOT NULL",
-  "ORDER BY survey_id"
+  "FROM visit"
 )
 
-#Limit the initial trial without changing the query used by the full run
 if (test.run) {
-  survey.query <- paste(survey.query, "LIMIT", test.n.surveys)
+  survey.query <- paste(
+    survey.query,
+    "ORDER BY survey_id LIMIT",
+    test.n.surveys
+  )
 }
 
 surveys <- dbGetQuery(database.connection, survey.query)
 
-#3. Disconnect from the BAMDataset----
-dbDisconnect(database.connection, shutdown = TRUE)
-
-#4. Check the survey input----
-#The package will perform more detailed validation before extraction
-nrow(surveys)
-range(surveys$survey_year)
-head(surveys)
-
-#COVARIATE EXTRACTION TABLE##############
-
-#1. Select logical raster series from the master asset catalogue----
-#The package collapses all physical year files into one extraction row per
-#series. Only assets registered as ready by their download scripts are used.
-selected.asset.series <- c(
-  "canlad_annual_class",
-  "ntems_wildfire_dnbr",
-  "scanfi_biomass",
-  "scanfi_age",
-  "scanfi_nfi_landcover"
-)
-
-extraction.table <- create_extraction_table(
-  assets = spatial.catalog.path,
-  asset_series_ids = selected.asset.series
-)
-
-#2. Configure every selected series as a point-level extraction----
-#create_extraction_table() deliberately returns disabled point-extraction rows.
-#Enable them here and give the DuckDB columns concise, stable names.
-extraction.table$enabled <- TRUE
-extraction.table$statistic <- "value"
-extraction.table$buffer_m <- 0
-
-#Enforce the Canadian extent in the extraction specification as well as in the
-#DuckDB query. This protects the workflow if its survey query is changed later.
-extraction.table$filter_column <- "in_Canada"
-
-output.names <- c(
-  canlad_annual_class = "canlad_class",
-  ntems_wildfire_dnbr = "wildfire_dnbr_1985_2022",
-  scanfi_biomass = "scanfi_biomass",
-  scanfi_age = "scanfi_age",
-  scanfi_nfi_landcover = "scanfi_landcover"
-)
-extraction.table$output_name <- unname(
-  output.names[extraction.table$asset_series_id]
-)
-
-if (
-  anyNA(extraction.table$output_name) ||
-    !setequal(extraction.table$asset_series_id, selected.asset.series)
-) {
-  stop("The extraction table does not contain every requested asset series")
+#3. Read existing covariates for incremental extraction----
+#Test runs deliberately start fresh so they remain small and easy to inspect.
+existing.covariates <- NULL
+if (!test.run && dbExistsTable(database.connection, "covariate")) {
+  existing.covariates <- dbReadTable(database.connection, "covariate")
 }
 
-#3. Inspect the extraction specification----
-#CanLaD should be annual, SCANFI nearest, and wildfire dNBR static.
+#4. Disconnect from the read-only database connection----
+dbDisconnect(database.connection, shutdown = TRUE)
+
+#5. Check the survey identifiers----
+surveys$survey_id <- as.character(surveys$survey_id)
+if (anyNA(surveys$survey_id) || any(!nzchar(surveys$survey_id))) {
+  stop("visit contains a blank or missing survey_id")
+}
+if (anyDuplicated(surveys$survey_id)) {
+  stop("visit contains duplicate survey_id values")
+}
+
+#6. Retain only usable coordinate rows for raster extraction----
+#All survey IDs are restored below. This subset prevents missing or infinite
+#coordinates from entering spatial operations.
+usable.coordinates <- !is.na(surveys$longitude) &
+  !is.na(surveys$latitude) &
+  is.finite(surveys$longitude) &
+  is.finite(surveys$latitude)
+
+extraction.surveys <- surveys[usable.coordinates, , drop = FALSE]
+if (!nrow(extraction.surveys)) {
+  stop("No surveys have usable coordinates for covariate extraction")
+}
+
+#7. Check and subset an existing covariate table----
+existing.for.extraction <- NULL
+if (!is.null(existing.covariates)) {
+  existing.covariates$survey_id <- as.character(existing.covariates$survey_id)
+  if (anyDuplicated(existing.covariates$survey_id)) {
+    stop("The existing covariate table contains duplicate survey_id values")
+  }
+  unknown.ids <- setdiff(existing.covariates$survey_id, surveys$survey_id)
+  if (length(unknown.ids)) {
+    stop(
+      "The existing covariate table contains survey IDs absent from visit. ",
+      "First unmatched value: ",
+      unknown.ids[[1]]
+    )
+  }
+  existing.for.extraction <- existing.covariates[
+    existing.covariates$survey_id %in% extraction.surveys$survey_id,
+    ,
+    drop = FALSE
+  ]
+}
+
+#8. Inspect the survey input----
+nrow(surveys)
+sum(usable.coordinates)
+table(surveys$in_Canada, useNA = "ifany")
+range(surveys$survey_year, na.rm = TRUE)
+head(surveys)
+
+#COVARIATE EXTRACTION TABLE##########
+
+#1. Read and validate the committed recipe----
+#Edit 05.CovariateExtractionTable.csv to add, disable, or document covariates.
+#BAMSpatialData/assets.csv is the starting point when adding a new data source,
+#but the analysis recipe is not regenerated every time this script runs.
+extraction.table <- read_extraction_table(
+  extraction_table = extraction.table.path,
+  raster_root = spatial.root,
+  check_files = FALSE
+)
+
+#2. Inspect the extraction specification----
 extraction.table
+
+#3. Preview what BAMCovariates will extract or retain----
+extraction.plan <- plan_covariate_extraction(
+  extraction_table = extraction.table,
+  existing_covariates = existing.for.extraction,
+  survey_crs = 4326,
+  buffer_crs = 3978
+)
+extraction.plan
 
 #EXTRACT##############################
 
-#1. Extract all selected point values into the R session----
-#Survey coordinates are longitude/latitude (EPSG:4326). buffer_crs is retained for compatibility with future buffer extractions but is not used when buffer_m is zero.
-covariates <- extract_covariates(
-  surveys = surveys,
+#1. Extract requested point values into the R session----
+#The package checks coordinates, temporal recipes, raster headers, requested
+#bands, and temporal coverage before or during extraction.
+extracted.covariates <- extract_covariates(
+  surveys = extraction.surveys,
   extraction_table = extraction.table,
-  raster_root = spatial.root,
   survey_crs = 4326,
   buffer_crs = 3978,
-  chunk_size = chunk.size
+  chunk_size = chunk.size,
+  existing_covariates = existing.for.extraction
 )
 
-#2. Check the combined covariate table----
+#2. Start the final table with every survey_id----
+covariates <- data.frame(
+  survey_id = surveys$survey_id,
+  stringsAsFactors = FALSE
+)
+
+#3. Retain existing values for every survey----
+#This includes existing values for visits that cannot enter spatial extraction.
+if (!is.null(existing.covariates)) {
+  existing.positions <- match(
+    covariates$survey_id,
+    existing.covariates$survey_id
+  )
+  for (column in setdiff(names(existing.covariates), "survey_id")) {
+    covariates[[column]] <- existing.covariates[[column]][existing.positions]
+  }
+}
+
+#4. Add new or updated extraction values----
+extracted.positions <- match(
+  covariates$survey_id,
+  extracted.covariates$survey_id
+)
+for (column in setdiff(names(extracted.covariates), "survey_id")) {
+  covariates[[column]] <- extracted.covariates[[column]][extracted.positions]
+}
+
+#Keep BAMCovariates metadata attached in the R session. Standard DuckDB tables
+#cannot store this R attribute, so it will not persist after database writing.
+attr(covariates, "BAMCovariates_metadata") <- attr(
+  extracted.covariates,
+  "BAMCovariates_metadata"
+)
+
+#CHECK###############################
+
+#1. Check the combined covariate table----
 nrow(covariates)
 head(covariates)
-table(covariates$canlad_class, useNA = "ifany")
-table(covariates$scanfi_landcover, useNA = "ifany")
-summary(
-  covariates[c(
-    "wildfire_dnbr_1985_2022",
-    "scanfi_biomass",
-    "scanfi_age"
-  )]
-)
+summary(covariates)
+attr(covariates, "BAMCovariates_metadata")
 
+if (nrow(covariates) != nrow(surveys)) {
+  stop("The covariate table does not contain one row per visit")
+}
 if (anyDuplicated(covariates$survey_id)) {
   stop("The covariate table contains duplicate survey_id values")
+}
+if (!identical(covariates$survey_id, surveys$survey_id)) {
+  stop("The covariate table survey order changed unexpectedly")
+}
+
+#2. Confirm that newly extracted values are limited to Canada----
+new.output.names <- extraction.plan$output_name[
+  extraction.plan$action %in% c("extract_new", "reextract_changed")
+]
+outside.canada <- is.na(surveys$in_Canada) | surveys$in_Canada != 1
+if (
+  length(new.output.names) &&
+    any(!is.na(covariates[outside.canada, new.output.names, drop = FALSE]))
+) {
+  stop("New covariate values were assigned outside the in_Canada extent")
 }
 
 #WRITE COVARIATE TABLE################
 
 #1. Protect the test workflow----
-#A test extraction should be inspected in the R session and not written to the
-#shared BAMDataset.
 if (write.covariate.table && test.run) {
   stop("Set test.run to FALSE before writing the covariate table")
 }
@@ -242,42 +317,37 @@ if (write.covariate.table) {
 
   tryCatch(
     {
-      #3. Protect or replace an existing covariate table----
+      #3. Create or replace the combined covariate table in a transaction----
+      #Existing columns have already been retained in covariates, so replacing
+      #the database table does not discard them.
       table.exists <- dbExistsTable(database.connection, "covariate")
-      if (table.exists && !overwrite.covariate.table) {
-        stop(
-          "The covariate table already exists in: ",
-          database.path,
-          "\nSet overwrite.covariate.table to TRUE only when replacement ",
-          "is intended."
-        )
-      }
-
-      #4. Write within a transaction----
-      #If writing fails, DuckDB rolls the transaction back and retains the
-      #previous database state.
       dbWithTransaction(
         database.connection,
         dbWriteTable(
           database.connection,
           name = "covariate",
           value = covariates,
-          overwrite = overwrite.covariate.table
+          overwrite = table.exists
         )
       )
 
-      #5. Verify the completed table----
+      #4. Verify the completed database table----
       written.rows <- dbGetQuery(
         database.connection,
         "SELECT COUNT(*) AS n FROM covariate"
       )$n[[1]]
+      written.columns <- dbListFields(database.connection, "covariate")
 
       if (written.rows != nrow(covariates)) {
         stop("The number of rows written to the covariate table is incorrect")
       }
+      if (!identical(written.columns, names(covariates))) {
+        stop("The columns written to the covariate table are incorrect")
+      }
 
-      message("Added covariate table to BAMDataset: ", database.path)
-      message("Rows written to covariate table: ", written.rows)
+      message("Updated covariate table in BAMDataset: ", database.path)
+      message("Rows written: ", written.rows)
+      message("Covariate columns: ", ncol(covariates) - 1L)
     },
     finally = {
       dbDisconnect(database.connection, shutdown = TRUE)
