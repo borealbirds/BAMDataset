@@ -58,7 +58,13 @@ mle = function(obj,
     
     # Compare "best_value" (the old MLE) to whatever the new best value is according to the function. If it's better, we run the profile again to see if we can further determine new optima.
     new_best_value = obj$fn(obj$env$last.par.best)
-    run_profile = new_best_value < (best_value - profile_improve_stop)
+    if (is.na(new_best_value)) {
+      warning("Profiling algorithm produced a new value for obj$env$last.par.best (optimal parameter value) that returns NA/NaN value for function. Resetting...")
+      run_profile = FALSE
+      obj$env$last.par.best = profile_to_table(pr)$est
+    } else {
+      run_profile = new_best_value < (best_value - profile_improve_stop)
+    }
     
   }
   

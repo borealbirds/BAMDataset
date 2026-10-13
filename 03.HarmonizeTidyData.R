@@ -628,6 +628,65 @@ ebd.tidy <- ebd.unique %>%
 
 #rm(ebd.unique, ebd.raw)
 
+#PRISM DATA WRANGLING ----
+
+#1. Tidy PRISM data ----
+
+v.prism = "2026-10-09"
+
+prism_raw = read_csv("G:/Shared drives/BAM_AvianData/Waterbirds/sourceData/CWS-PRISM/PRISM-Arctic/Arctic_PRISM_Surveys_Tier1_Birds_Data_Données.csv")
+prism_locs = st_read("G:/Shared drives/BAM_AvianData/Waterbirds/sourceData/CWS-PRISM/PRISM-Arctic/Arctic_PRISM_Surveys_Tier1_Plots.shp")
+
+prism_areas = st_area(prism_locs)
+
+prism_centroids = prism_locs %>%
+  st_centroid %>%
+  st_coordinates %>%
+  as.data.frame %>%
+  set_names("longitude", "latitude") %>%
+  mutate(area = prism_areas)
+
+prism_locs_coords = prism_locs %>%
+  st_drop_geometry %>%
+  cbind(prism_centroids) %>%
+  mutate(Plot_ID = as.numeric(str_split_i(id, "ID_", 2))) %>%
+  dplyr::select(Plot_ID,
+                longitude,
+                latitude,
+                area)
+
+prism.tidy = prism_raw %>%
+  left_join(prism_locs_coords, by = join_by(Plot_ID == Plot_ID)) %>%
+  mutate(data_source = "PRISM",
+         sensor = "PRISM",
+         organization = "CWS-PRISM",
+         project_id = 99998,
+         location_id = Plot_ID,
+         location_buffer_m = 0,
+         longitude = longitude,
+         latitude = latitude,
+         survey_id = paste0("PRISM_", ContactID),
+         date_time = as.POSIXct(paste0(Survey_year, "-", sprintf("%02d", Survey_month), "-", sprintf("%02d", Survey_day), " ", Start_Time_1), 
+                                format = "%Y-%m-%d %H:%M:%OS",
+                                tz = "UTC"),
+         status = NA,
+         method = "PRISM",
+         duration = Survey_Duration_Hrs * 60,
+         # This takes the PRISM effective area and converts it to the radius of an equal-area circle
+         distance = as.numeric(sqrt(area * Plot_Area_Proportion_Surveyed / pi)),
+         max_noise_type = "",
+         max_noise_volume = "",
+         species = ECCC_species_code,
+         # Assume it's true
+         flag_err_date = FALSE,
+         flag_err_loc = FALSE,
+         flag_noise = FALSE,
+         flag_task_wt = FALSE,
+         flag_manual = FALSE,
+         count = Total_Individuals_Adult,
+         .keep = "none") %>%
+  dplyr::filter(!is.na(longitude), !is.na(latitude), !is.na(date_time))
+
 #COMBINE##############
 
 #1. Put the three sources together and apply common flags ----
@@ -635,11 +694,12 @@ ebd.tidy <- ebd.unique %>%
 # changing flags merely because the script is rerun on a later date.
 EBD_END_DATE <- as.Date(ceiling_date(my(v.ebd), "month") - days(1))
 
-all.tidy <- bind_rows(wt.tidy, ebd.tidy) |>
+all.tidy <- bind_rows(wt.tidy, ebd.tidy, prism.tidy) |>
   mutate(
     .source_end_date = case_when(
       data_source == "WildTrax" ~ as.Date(v.wt),
       data_source == "eBird" ~ EBD_END_DATE,
+      data_source == "PRISM" ~ as.Date(v.prism),
       TRUE ~ as.Date(NA)
     ),
     # Shared breeding-season flag: June 1 through July 15, inclusive.
@@ -1029,11 +1089,11 @@ visit_sf <- st_as_sf(
 
 db_conn_path_qpad <- file.path(
   root,
-  paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
+  paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb")
 )
 db_conn_path_models <- file.path(
   root,
-  paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
+  paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb")
 )
 
 ### qpad first! ----
