@@ -657,6 +657,11 @@ prism_locs_coords = prism_locs %>%
 
 prism.tidy = prism_raw %>%
   left_join(prism_locs_coords, by = join_by(Plot_ID == Plot_ID)) %>%
+  group_by(ContactID, ECCC_species_code) %>%
+  # only use adult individuals here?
+  mutate(all_counts = sum(Total_Individuals_Adult)) %>%
+  ungroup %>%
+  distinct(ContactID, ECCC_species_code, .keep_all = TRUE) %>%
   mutate(data_source = "PRISM",
          sensor = "PRISM",
          organization = "CWS-PRISM",
@@ -683,9 +688,9 @@ prism.tidy = prism_raw %>%
          flag_noise = FALSE,
          flag_task_wt = FALSE,
          flag_manual = FALSE,
-         count = Total_Individuals_Adult,
+         count = all_counts,
          .keep = "none") %>%
-  dplyr::filter(!is.na(longitude), !is.na(latitude), !is.na(date_time))
+  dplyr::filter(!is.na(longitude), !is.na(latitude), !is.na(date_time), count > 0)
 
 #COMBINE##############
 

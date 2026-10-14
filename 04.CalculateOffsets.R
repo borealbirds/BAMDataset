@@ -1,9 +1,27 @@
 library(tidyverse)
 library(RTMB)
+library(sf)
+library(duckdb)
+library(duckspatial)
 
 # Read in BAM Dataset ----
 
+lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
+root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
+v.wt <- "2026-08-26"
+v.ebd = "Jun-2026"
+v.prism = "2026-10-09"
+
+# Read in QPAD data and filter to "useful" observations with distance / time info ----
+
+db_conn_path = file.path(root, paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+db_conn = dbConnect(duckdb(db_conn_path))
+dbExecute(db_conn, "LOAD spatial") # have to do this for whatever reason
+
+db_bam_conn_path = file.path(root, paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
+dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
 
 # Add covariates ----
 
