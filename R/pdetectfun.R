@@ -15,6 +15,8 @@ pdetectfun = function(log_lam,
                       method = c("ind", "joint"),
                       zero_value = 0) {
   
+  if (is.na(log_lam) || is.na(log_alp)) return(NA)
+  
   method = method[1]
   
   lam = exp(log_lam)

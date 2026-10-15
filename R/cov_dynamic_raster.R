@@ -47,7 +47,7 @@ cov_dynamic_raster = function(cov_name,
       
       vdf_na = vdf %>% 
         dplyr::filter(is.na(file_ind)) %>%
-        mutate(file_ind = sapply(as.POSIXct(tf, format = by), function(dd) which.min(abs(dd - raster_files_dates_pos))))
+        mutate(file_ind = sapply(t, function(dd) which.min(abs(dd - raster_files_dates_pos))))
       
       vdf[is.na(vdf$file_ind), ] = vdf_na
       vdf = vdf %>% arrange(file_ind, ord)

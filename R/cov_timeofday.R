@@ -16,7 +16,12 @@ cov_tod_bin = function(cov_name) {
     
     # get time zone associated with each time (we assume the times are in local time but need a time zone)
     tz_vals = lutz::tz_lookup(xy_proj, warn = FALSE, method = "accurate")
-    dates_forced = force_tzs(t, tz_vals)
+    
+    # check for bad time zones (very rare but it happens!)
+    tz_error = str_detect(tz_vals, "; ")
+    tz_fix = str_split_i(tz_vals, "; ", 1)
+    
+    dates_forced = force_tzs(t, tz_fix)
     
     solar_data = data.frame(date = as.Date(dates_forced),
                             lat = xy_proj_crds[, 2],
@@ -34,7 +39,7 @@ cov_tod_bin = function(cov_name) {
              t_since_nauticaldawn = diff_fun(t, nauticalDawn),
              timeofday = get_tod(t_since_nauticaldawn, t_since_dawn, t_since_sunrise, t_since_goldenend, t_since_golden, t_since_dusk, t_since_nauticaldusk, t_since_nadir))
     
-    sun_times$timeofday
+    ifelse(tz_error, NA, sun_times$timeofday)
     
   }
   
