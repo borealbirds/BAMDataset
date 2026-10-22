@@ -15,7 +15,7 @@ if (!FIR) {
   qpad_fit_dir = "G:/Shared drives/BAM_RshProjs/Methodology/Detectability/QPADModelFits/qpad_fits"
   dat_dir = "G:/Shared drives/BAM_RshProjs/Methodology/Detectability/QPADModelFits/data"
 } else {
-  root = ""
+  root = getwd()
   qpad_fit_dir = "/scratch/pt1/bam/qpad_fits"
   dat_dir = "data"
 }
@@ -23,6 +23,15 @@ if (!FIR) {
 v.wt <- "2026-08-26"
 v.ebd = "Jun-2026"
 v.prism = "2026-10-09"
+
+duckdb_lock_file = "duckdb_bam_lock.csv"
+
+# if there's already a lock file, just run this again and again and wait. Add an extra Sys.sleep to space out in case a bunch of jobs make the file at the same time
+Sys.sleep(runif(1, 0, 30))
+while(file.exists(duckdb_lock_file)) Sys.sleep(0.5)
+
+# once the file no longer exists, write it
+write_csv(data.frame(0), duckdb_lock_file)
 
 # Read in QPAD data and filter to "useful" observations with distance / time info ----
 
@@ -35,6 +44,13 @@ db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
 dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
 
 visit = ddbs_read_table(db_bam_conn, name = "visit")
+
+# disconnect!
+dbDisconnect(db_conn)
+dbDisconnect(db_bam_conn)
+
+# remove the lock so other processes can run
+file.remove(duckdb_lock_file)
 
 # Add covariates ----
 
@@ -53,11 +69,11 @@ visit_cov = visit %>%
          aru_01 = (sensor == "ARU"),
          distance_km = pmin(1, distance / 1000),
          duration_min = duration / 60) %>%
-  dplyr::filter(!is.na(timeofday))
+  dplyr::filter(!is.na(timeofday), !is.na(distance_km), !is.na(duration_min))
 
 # Go through each species and calculate offset ----
 
-all_species_df = read_csv(file.path(qpad_fit_dir, "qpad_report_20261013.csv"))
+all_species_df = read_csv(file.path(qpad_fit_dir, "reports", "qpad_report_20261013.csv"))
 all_species = all_species_df %>%
   dplyr::filter(!is.na(species_code)) %>%
   pull(species_code)
@@ -115,8 +131,21 @@ for (sp in all_species) {
 
 # Add new dataframe with offsets to duckdb connection and write ----
 
+# if there's already a lock file, just run this again and again and wait. I don't think we need the extra Sys.sleep() anymore.
+while(file.exists(duckdb_lock_file)) Sys.sleep(0.5)
+
+# once the file no longer exists, write it
+write_csv(data.frame(0), duckdb_lock_file)
+
+db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
+dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
+
 offsets = visit_cov %>%
   st_drop_geometry %>%
   dplyr::select(survey_id, starts_with("offset_"))
 
-dbWriteTable(db_bam_conn, name = "offsets", offsets)
+dbWriteTable(db_bam_conn, name = "offsets", offsets, overwrite = TRUE)
+dbDisconnect(db_bam_conn)
+
+# remove the lock so other processes can run
+file.remove(duckdb_lock_file)
