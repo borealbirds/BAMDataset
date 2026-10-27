@@ -14,6 +14,16 @@ get_offset = function(lambda_pars,
   log_lambda = lambda_pars[timeofday_names] + lambda_pars["log_lambda_timeofyear"] * timeofyear + lambda_pars["log_lambda_is_aru"] * aru_01
   log_alpha = alpha_pars["log_alpha_"] + alpha_pars["log_alpha_open_closed"] * biomass + alpha_pars["log_alpha_near_road"] * near_road
   
+  get_offset(log_lambda, log_alpha, duration = duration, distance = distance, log = log)
+  
+}
+
+get_offset_la = function(log_lambda,
+                         log_alpha,
+                         duration = 3,
+                         distance = 1,
+                         log = TRUE) {
+  
   # get proportion of birds detected by each survey
   p_detected_inrange = Vectorize(pdetectfun, vectorize.args = c("log_lam", "log_alp", "rmax", "tmax"))(log_lambda, log_alpha, duration, distance, method = "joint")
   
