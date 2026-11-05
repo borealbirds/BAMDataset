@@ -11,7 +11,7 @@ get_cov_matrix = function(fit) {
   if (nrow(fit$hessian) != ncol(fit$hessian)) stop("'fit$hessian' must be a square matrix")
   
   ci95_factor = qnorm(0.975)
-  this_cov_mat = try(solve(force_symmetric(this_fit$hessian)))
+  this_cov_mat = try(solve(force_symmetric(fit$hessian)))
   
   if (is(this_cov_mat, "try-error") || any(is.na(this_cov_mat))) {
     this_cov_mat = diag(sapply(seq_along(fit$ci_table$est), function(ind) ((fit$ci_table$CU[ind] - fit$ci_table$CL[ind]) / ci95_factor / 2) ^ 2))

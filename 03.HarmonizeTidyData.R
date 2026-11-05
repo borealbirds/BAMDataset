@@ -26,6 +26,7 @@ lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
+dat_assess_dir = "G:/Shared drives/BAM_AvianData/Data Sharing/Dataset Assessment/Exclusion"
 
 #3. Set the WildTrax version ----
 v.wt <- "2026-08-26"
@@ -171,15 +172,11 @@ db_conn_path <- file.path(
 db_conn <- dbConnect(duckdb(db_conn_path))
 
 bad_tasks <- read_xlsx(file.path(
-  root,
-  "Dataset Assessment",
-  "Exclusion",
+  dat_assess_dir,
   "Retenu_visite.xlsx"
 ))
 bad_aru_projects <- read_csv(file.path(
-  root,
-  "Dataset Assessment",
-  "Exclusion",
+  dat_assess_dir,
   "aru_bad_timestamps_prt_20260716.csv"
 ))
 

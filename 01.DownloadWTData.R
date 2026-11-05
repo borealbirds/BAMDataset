@@ -41,7 +41,7 @@ proj.aru <- wt_get_projects("ARU")
 proj.pc <- wt_get_projects("PC")
 
 #2. Get list for exclusion for CWS-PRA ----
-ex <- read_excel(file.path(root, "Dataset Assessment", "Exclusion", "CWS-PRA_projects_Apr2026.xlsx")) |> 
+ex <- read_excel(file.path("G:/Shared drives/BAM_AvianData/Data Sharing", "Dataset Assessment", "Exclusion", "CWS-PRA_projects_Apr2026.xlsx")) |> 
   dplyr::filter(Sharing=="Exclude")
 
 #3. Filter project list ----

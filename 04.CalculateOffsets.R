@@ -5,6 +5,7 @@ library(duckdb)
 library(duckspatial)
 library(terra)
 library(mvtnorm)
+library(dtplyr)
 
 # Read in BAM Dataset ----
 
@@ -13,12 +14,21 @@ lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 FIR = str_detect(getwd(), "^/project")
 if (!FIR) {
   root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
-  qpad_fit_dir = "G:/Shared drives/BAM_RshProjs/Methodology/Detectability/QPADModelFits/qpad_fits"
+  qpad_report_dir = "G:/Shared drives/BAM_RshProjs/Methodology/Detectability/QPADModelFits/qpad_fits"
+  qpad_fit_dir = file.path(qpad_report_dir, c("Other", "Typicaldawnspecies", "Waterbirds"))
   dat_dir = "G:/Shared drives/BAM_RshProjs/Methodology/Detectability/QPADModelFits/data"
 } else {
   root = getwd()
   qpad_fit_dir = "/scratch/pt1/bam/qpad_fits"
+  qpad_report_dir = qpad_fit_dir
   dat_dir = "data"
+}
+
+search_for_file = function(dirs, filename) {
+  
+  all_files = file.path(dirs, filename)
+  all_files[file.exists(all_files)]
+  
 }
 
 v.wt <- "2026-08-26"
@@ -56,7 +66,7 @@ file.remove(duckdb_lock_file)
 # Add covariates ----
 
 DEG_CRS = "EPSG:4326"
-N_BOOT = 200 # for generating random offsets
+N_BOOT = 30 # for generating random offsets
 
 timeofday_cov = cov_tod_bin("timeofday")
 closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path(dat_dir, "scanfi_biomass_agg"), method = "nearest")
@@ -92,12 +102,14 @@ ALL_POSSIBLE_PAR_NAMES = c("log_lambda_nauticaldawn",
                            "log_alpha_open_closed",
                            "log_alpha_near_road")
 
-all_species_df = read_csv(file.path(qpad_fit_dir, "reports", "qpad_report_20261013.csv"))
+all_species_df = read_csv(file.path(qpad_report_dir, "reports", "qpad_report_20261028.csv"))
 all_species = all_species_df %>%
   dplyr::filter(!is.na(species_code)) %>%
   pull(species_code)
 
-for (sp in all_species[1:10]) {
+all_offsets = lapply(all_species[1:3], function(sp) {
+  
+  message("beginning ", sp)
   
   this_report = all_species_df %>%
     dplyr::filter(species_code == sp)
@@ -114,10 +126,13 @@ for (sp in all_species[1:10]) {
   if (!is.na(include_this_species) && include_this_species) {
     ## Read in the appropriate QPAD fit ----
     
-    this_fit_filepath = file.path(qpad_fit_dir, paste0(sp, ".rds"))
+    this_fit_filepath = search_for_file(qpad_fit_dir, paste0(sp, ".rds"))
     if (!file.exists(this_fit_filepath)) {
       message("There is no existing QPAD fit for ", sp, ", even though it is in the report. Using an old report file? Moving on...")
     } else {
+      
+      message("Reading in the fit...")
+      
       this_fit = readRDS(this_fit_filepath)$full
       
       ## Calculate the offset for each survey ----
@@ -125,13 +140,13 @@ for (sp in all_species[1:10]) {
       lambda_par_names = paste0("log_lambda_", colnames(this_fit$dat$lambda_covs))
       alpha_par_names = paste0("log_alpha_", colnames(this_fit$dat$alpha_covs))
       
+      message("Making random parameters...")
+      
       r_pars = rmvnorm(N_BOOT, this_pars_all, get_cov_matrix(this_fit)) %>%
         as.data.frame %>%
-        set_names(c(lambda_par_names, alpha_par_names)) %>%
-        mutate(boot_id = seq_len(N_BOOT))
+        set_names(c(lambda_par_names, alpha_par_names))
       
-      pars_df = pars_df_base %>%
-        left_join(r_pars, by = join_by(boot_id == boot_id)) %>%
+      pars_df = cbind(pars_df_base, r_pars[rep(seq_along(nrow(r_pars)), each = N_BOOT), ]) %>%
         check_names(ALL_POSSIBLE_PAR_NAMES, fill = 0) %>%
         mutate(log_lambda = log_lambda_nauticaldawn * (timeofday == "nauticaldawn") +
                  log_lambda_sunrise * (timeofday == "sunrise") +
@@ -146,6 +161,8 @@ for (sp in all_species[1:10]) {
                  log_alpha_open_closed * biomass)
       
       prism_conversion_rates = log(pi * visit_cov$distance_km ^ 2 * 100) # area of PRISM plots in hectares
+      
+      message("Calculating offsets and metrics...")
       
       all_par_offsets = pars_df %>%
         mutate(offset = get_offset_la(log_lambda, log_alpha, duration_min, distance_km),
@@ -165,11 +182,18 @@ for (sp in all_species[1:10]) {
         # species-specific names to use in the final join
         set_names(paste0("offset_", c("mean", "sd"), "_", sp))
       
-      visit_cov = cbind(visit_cov, all_par_offsets)
+      message("Returning...")
+      
+      return(all_par_offsets)
     }
   }
   
-}
+  numeric(0)
+  
+})
+
+all_offsets_df = do.call(cbind, all_offsets[sapply(all_offsets, is.data.frame)]) %>%
+  mutate(survey_id = visit_cov$survey_id)
 
 # Add new dataframe with offsets to duckdb connection and write ----
 
@@ -182,11 +206,7 @@ write_csv(data.frame(0), duckdb_lock_file)
 db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
 dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
 
-offsets = visit_cov %>%
-  st_drop_geometry %>%
-  dplyr::select(survey_id, starts_with("offset_"))
-
-dbWriteTable(db_bam_conn, name = "offsets", offsets, overwrite = TRUE)
+dbWriteTable(db_bam_conn, name = "offsets", all_offsets_df, overwrite = TRUE)
 dbDisconnect(db_bam_conn)
 
 # remove the lock so other processes can run
