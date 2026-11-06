@@ -52,8 +52,8 @@ get_offset_la_mc = function(log_lambda,
   n_obs = nrow(in_dat)
   in_dat$par_id = seq_len(n_obs)
   
-  dat_dt = as.data.table(expand_grid(in_dat, r = runif(nr, 0, distance)))[
-    , p_detected := 2 * r / distance ^ 2 * (1 - exp(-duration * exp(log_lambda - (exp(log_alpha) * r) ^ 2)))][
+  dat_dt = as.data.table(expand_grid(in_dat, r = runif(nr, 0, 1)))[
+    , p_detected := 2 * r * (1 - exp(-duration * exp(log_lambda - (exp(log_alpha) * (r * distance)) ^ 2)))][
       , .(p_detected = mean(p_detected)), by = par_id]
   
   survey_areas = pi * in_dat$distance ^ 2

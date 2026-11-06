@@ -6,6 +6,8 @@ library(duckspatial)
 library(terra)
 library(mvtnorm)
 library(dtplyr)
+library(foreach)
+library(doParallel)
 
 # Read in BAM Dataset ----
 
@@ -34,6 +36,17 @@ search_for_file = function(dirs, filename) {
 v.wt <- "2026-08-26"
 v.ebd = "Jun-2026"
 v.prism = "2026-10-09"
+
+# Folder for per-species offset files (one parquet file per species), stamped with the data versions so
+# files from different dataset versions are never mixed. These are assembled into a single "offsets"
+# table at the end of the script.
+offset_dir = file.path(ifelse(FIR, "/scratch/pt1/bam/offsets_parquet", "offsets_parquet"),
+                       paste0("WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism))
+dir.create(offset_dir, recursive = TRUE, showWarnings = FALSE)
+
+# If TRUE, species that already have a file in offset_dir are not recalculated (useful for resuming a
+# run that stopped partway). Leave FALSE if anything upstream (data, covariates, fits, code) has changed.
+SKIP_EXISTING_OFFSETS = FALSE
 
 duckdb_lock_file = "duckdb_bam_lock.csv"
 
@@ -83,9 +96,6 @@ visit_cov = visit[1:1000, ] %>%
          duration_min = duration / 60) %>%
   dplyr::filter(!is.na(timeofday), !is.na(distance_km), !is.na(duration_min))
 
-pars_df_base = expand_grid(boot_id = seq_len(N_BOOT),
-                           survey_id = visit_cov$survey_id) %>%
-  left_join(visit_cov, by = join_by(survey_id == survey_id))
 
 # Go through each species and calculate offset ----
 
@@ -107,7 +117,13 @@ all_species = all_species_df %>%
   dplyr::filter(!is.na(species_code)) %>%
   pull(species_code)
 
-all_offsets = lapply(all_species[1:3], function(sp) {
+# Set up parallelization
+ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
+if (is.na(ncores)) ncores = 1
+registerDoParallel(cores = ncores)
+
+# each species' offsets are written to their own parquet file; the loop returns the file paths
+offset_files = foreach(sp = all_species[1:10]) %dopar% {
   
   message("beginning ", sp)
   
@@ -124,10 +140,17 @@ all_offsets = lapply(all_species[1:3], function(sp) {
   include_aru = this_report$include_aru
   
   if (!is.na(include_this_species) && include_this_species) {
+
+    this_offset_file = file.path(offset_dir, paste0("offsets_", sp, ".parquet"))
+    if (SKIP_EXISTING_OFFSETS && file.exists(this_offset_file)) {
+      message("Offsets already exist for ", sp, "; skipping")
+      return(this_offset_file)
+    }
+
     ## Read in the appropriate QPAD fit ----
-    
-    this_fit_filepath = search_for_file(qpad_fit_dir, paste0(sp, ".rds"))
-    if (!file.exists(this_fit_filepath)) {
+
+    this_fit_filepath = search_for_file(qpad_fit_dir, paste0(sp, ".rds"))[1]
+    if (is.na(this_fit_filepath)) {
       message("There is no existing QPAD fit for ", sp, ", even though it is in the report. Using an old report file? Moving on...")
     } else {
       
@@ -146,56 +169,61 @@ all_offsets = lapply(all_species[1:3], function(sp) {
         as.data.frame %>%
         set_names(c(lambda_par_names, alpha_par_names))
       
-      pars_df = cbind(pars_df_base, r_pars[rep(seq_along(nrow(r_pars)), each = N_BOOT), ]) %>%
-        check_names(ALL_POSSIBLE_PAR_NAMES, fill = 0) %>%
-        mutate(log_lambda = log_lambda_nauticaldawn * (timeofday == "nauticaldawn") +
-                 log_lambda_sunrise * (timeofday == "sunrise") +
-                 log_lambda_morning * (timeofday == "morning") +
-                 log_lambda_day * (timeofday == "day") +
-                 log_lambda_sunset * (timeofday == "sunset") +
-                 log_lambda_nauticaldusk * (timeofday == "nauticaldusk") +
-                 log_lambda_night * (timeofday == "night") +
-                 log_lambda_timeofyear * timeofyear,
-               log_alpha = log_alpha_ + 
-                 log_alpha_near_road * ifelse(!is.na(include_road) && include_road, near_road, 0) + 
-                 log_alpha_open_closed * biomass)
-      
       prism_conversion_rates = log(pi * visit_cov$distance_km ^ 2 * 100) # area of PRISM plots in hectares
-      
+
       message("Calculating offsets and metrics...")
-      
-      all_par_offsets = pars_df %>%
-        mutate(offset = get_offset_la(log_lambda, log_alpha, duration_min, distance_km),
-               # fix if NA
-               offset = ifelse(timeofday %in% tod_to_keep, offset, NA)) %>%
-        group_by(survey_id) %>%
-        # placeholder names for now so we can use dplyr notation
-        summarize(mean_log_offset = mean(offset),
-                  sd_log_offset = sd(offset)) %>%
-        ungroup %>%
+
+      # one row per survey (in visit_cov order); linear predictors for all N_BOOT draws are built inside
+      all_par_offsets = get_offset_boot_mat(dat = visit_cov,
+                                            r_pars = r_pars,
+                                            include_road = !is.na(include_road) && include_road,
+                                            tod_to_keep = tod_to_keep,
+                                            all_par_names = ALL_POSSIBLE_PAR_NAMES,
+                                            chunk_size = 100) %>%
         # correct for PRISM
-        mutate(sensor = visit_cov$sensor,
-               mean_log_offset = ifelse(sensor == "PRISM", prism_conversion_rates, mean_log_offset),
-               sd_log_offset = ifelse(sensor == "PRISM", 0, sd_log_offset)) %>%
-        # remove columns that would otherwise be repeated when we cbind
-        dplyr::select(-survey_id, -sensor) %>%
-        # species-specific names to use in the final join
-        set_names(paste0("offset_", c("mean", "sd"), "_", sp))
-      
-      message("Returning...")
-      
-      return(all_par_offsets)
+        mutate(mean_log_offset = ifelse(visit_cov$sensor == "PRISM", prism_conversion_rates, mean_log_offset),
+               sd_log_offset = ifelse(visit_cov$sensor == "PRISM", 0, sd_log_offset))
+
+      message("Writing offsets to ", this_offset_file)
+
+      # long format: one row per survey for this species
+      write_parquet_duckdb(data.frame(survey_id = visit_cov$survey_id,
+                                      species_code = sp,
+                                      offset_mean = all_par_offsets$mean_log_offset,
+                                      offset_sd = all_par_offsets$sd_log_offset),
+                           this_offset_file)
+
+      return(this_offset_file)
     }
   }
-  
-  numeric(0)
-  
-})
 
-all_offsets_df = do.call(cbind, all_offsets[sapply(all_offsets, is.data.frame)]) %>%
-  mutate(survey_id = visit_cov$survey_id)
+  NULL
 
-# Add new dataframe with offsets to duckdb connection and write ----
+}
+
+offset_files = unlist(offset_files)
+offset_species = str_match(basename(offset_files), "^offsets_(.*)\\.parquet$")[, 2]
+
+# Assemble the per-species files into one wide "offsets" table in the BAM duckdb ----
+# Columns are offset_mean_<sp>, offset_sd_<sp> for each species, then survey_id (one row per survey, in
+# visit_cov order). Every file has the same surveys in the same order, so DuckDB stitches them together
+# side by side (POSITIONAL JOIN) straight from the parquet files in one streaming pass; the full table
+# never has to fit in R's memory. An "ids_match" column records whether every file's survey_id agrees
+# with the first file's on that row; it is checked and then dropped below.
+
+offset_alias = paste0("f", seq_along(offset_files))
+offset_select = c(paste0(offset_alias, ".offset_mean AS ", dbQuoteIdentifier(ANSI(), paste0("offset_mean_", offset_species)), ",\n       ",
+                         offset_alias, ".offset_sd AS ", dbQuoteIdentifier(ANSI(), paste0("offset_sd_", offset_species))),
+                  "f1.survey_id",
+                  paste0("coalesce(", paste(c("true", paste0(offset_alias[-1], ".survey_id = f1.survey_id")), collapse = " AND "), ", false) AS ids_match"))
+offset_from = paste0("read_parquet(", dbQuoteString(ANSI(), normalizePath(offset_files, winslash = "/")), ") ", offset_alias,
+                     collapse = "\nPOSITIONAL JOIN ")
+
+offsets_query = paste0("CREATE OR REPLACE TABLE offsets_new AS\n",
+                       "SELECT ", paste(offset_select, collapse = ",\n       "), "\n",
+                       "FROM ", offset_from)
+
+# Write the offsets table to the duckdb database ----
 
 # if there's already a lock file, just run this again and again and wait. I don't think we need the extra Sys.sleep() anymore.
 while(file.exists(duckdb_lock_file)) Sys.sleep(0.5)
@@ -206,7 +234,25 @@ write_csv(data.frame(0), duckdb_lock_file)
 db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
 dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
 
-dbWriteTable(db_bam_conn, name = "offsets", all_offsets_df, overwrite = TRUE)
+# if this query needs more memory than is available, DuckDB spills to disk; keep that on fast local storage
+dbExecute(db_bam_conn, paste0("SET temp_directory = ", dbQuoteString(db_bam_conn, normalizePath(file.path(offset_dir, "duckdb_tmp"), winslash = "/", mustWork = FALSE))))
+if (length(offset_files) > 0) {
+  dbExecute(db_bam_conn, offsets_query)
+  n_mismatch = dbGetQuery(db_bam_conn, "SELECT count(*) AS n FROM offsets_new WHERE NOT ids_match")$n
+  if (n_mismatch > 0) {
+    # leave any existing offsets table untouched
+    dbExecute(db_bam_conn, "DROP TABLE offsets_new")
+    dbDisconnect(db_bam_conn)
+    file.remove(duckdb_lock_file)
+    stop(n_mismatch, " rows had mismatched survey_ids across the per-species offset files (were some files made ",
+         "from a different visit_cov, e.g. with SKIP_EXISTING_OFFSETS = TRUE?). The offsets table was not changed.")
+  }
+  dbExecute(db_bam_conn, "ALTER TABLE offsets_new DROP COLUMN ids_match")
+  dbExecute(db_bam_conn, "DROP TABLE IF EXISTS offsets")
+  dbExecute(db_bam_conn, "ALTER TABLE offsets_new RENAME TO offsets")
+} else {
+  message("No offset files were produced; the offsets table was not written")
+}
 dbDisconnect(db_bam_conn)
 
 # remove the lock so other processes can run

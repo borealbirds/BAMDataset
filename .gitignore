@@ -57,3 +57,6 @@ WTlogin.R
 # R project
 *.Rproj
 .positai
+
+# per-species offset files written by 04.CalculateOffsets.R
+offsets_parquet/
