@@ -4,6 +4,10 @@
 # created: March 4, 2026
 # ---
 
+# PRT TO DO Nov 9 2026: We should probably keep surveys without anything detected (i.e., the only detection is one row of "NONE") in the dataset so we have those as confirmed absences for other species. Right now I think they're being removed. Need to fix!
+
+# PRT Note Nov 9 2026: Following on the above, I think we should remove the wt_tidy_species() command, and instead filter out projects that don't target birds with a lookup table. This is because if we want to keep "true" NONE observations (which we should, IMO) then they will be retained from projects that did not look for birds. For example, an amphibian survey that did not record any amphibians but did record birds will be mistaken for a *bird* survey that did not record birds and the models will think there are no birds there. Eventually, I will get a list of non-bird projects (probably easiest to do it by evaluating % of non-NONE observations in a project that are birds) so a lookup table can be built to remove them.
+
 #NOTES################################
 
 #PURPOSE: This script wrangles & combines eBird data with the cleaned WildTrax data. Loading the ebird datasets takes time, be patient.
@@ -21,6 +25,7 @@ library(terra)
 library(sf)
 library(duckdb)
 library(duckspatial)
+library(dtplyr)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
@@ -220,7 +225,7 @@ aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   ) %>%
   # drop geometry for now
   st_drop_geometry %>%
-  # remove non-birds
+  # remove non-birds.
   wt_tidy_species(remove = c("abiotic", "insect", "human")) %>%
   dplyr::filter(
     !(species_code %in% c("NONE")),
