@@ -204,7 +204,7 @@ offset_files = foreach(sp = all_species) %dopar% {
 offset_files = unlist(offset_files)
 offset_species = str_match(basename(offset_files), "^offsets_(.*)\\.parquet$")[, 2]
 
-# Assemble the per-species files into one wide "offsets" table in the BAM duckdb ----
+# Assemble the per-species files into one wide "offsets" table in a new offsets duckdb file ----
 # Columns are offset_mean_<sp>, offset_sd_<sp> for each species, then survey_id (one row per survey, in
 # visit_cov order). Every file has the same surveys in the same order, so DuckDB stitches them together
 # side by side (POSITIONAL JOIN) straight from the parquet files in one streaming pass; the full table
@@ -219,41 +219,40 @@ offset_select = c(paste0(offset_alias, ".offset_mean AS ", dbQuoteIdentifier(ANS
 offset_from = paste0("read_parquet(", dbQuoteString(ANSI(), normalizePath(offset_files, winslash = "/")), ") ", offset_alias,
                      collapse = "\nPOSITIONAL JOIN ")
 
-offsets_query = paste0("CREATE OR REPLACE TABLE offsets_new AS\n",
+offsets_query = paste0("CREATE TABLE offsets AS\n",
                        "SELECT ", paste(offset_select, collapse = ",\n       "), "\n",
                        "FROM ", offset_from)
 
-# Write the offsets table to the duckdb database ----
+# Write the offsets table to a new duckdb file ----
+# The BAM / QPAD databases are not touched here, so the lock file is not needed. The table is built in
+# "<file>.tmp" and only renamed to the final name once it passes the survey_id check, so an existing
+# offsets file is replaced only by a complete, verified one.
 
-# if there's already a lock file, just run this again and again and wait. I don't think we need the extra Sys.sleep() anymore.
-while(file.exists(duckdb_lock_file)) Sys.sleep(0.5)
+db_offsets_path = file.path(root, paste0("04_OffsetsDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+db_offsets_tmp_path = paste0(db_offsets_path, ".tmp")
 
-# once the file no longer exists, write it
-write_csv(data.frame(0), duckdb_lock_file)
-
-db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
-dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
-
-# if this query needs more memory than is available, DuckDB spills to disk; keep that on fast local storage
-dbExecute(db_bam_conn, paste0("SET temp_directory = ", dbQuoteString(db_bam_conn, normalizePath(file.path(offset_dir, "duckdb_tmp"), winslash = "/", mustWork = FALSE))))
 if (length(offset_files) > 0) {
-  dbExecute(db_bam_conn, offsets_query)
-  n_mismatch = dbGetQuery(db_bam_conn, "SELECT count(*) AS n FROM offsets_new WHERE NOT ids_match")$n
-  if (n_mismatch > 0) {
-    # leave any existing offsets table untouched
-    dbExecute(db_bam_conn, "DROP TABLE offsets_new")
-    dbDisconnect(db_bam_conn)
-    file.remove(duckdb_lock_file)
-    stop(n_mismatch, " rows had mismatched survey_ids across the per-species offset files (were some files made ",
-         "from a different visit_cov, e.g. with SKIP_EXISTING_OFFSETS = TRUE?). The offsets table was not changed.")
-  }
-  dbExecute(db_bam_conn, "ALTER TABLE offsets_new DROP COLUMN ids_match")
-  dbExecute(db_bam_conn, "DROP TABLE IF EXISTS offsets")
-  dbExecute(db_bam_conn, "ALTER TABLE offsets_new RENAME TO offsets")
-} else {
-  message("No offset files were produced; the offsets table was not written")
-}
-dbDisconnect(db_bam_conn)
+  # clear out any leftovers from an earlier failed run
+  file.remove(list.files(dirname(db_offsets_tmp_path), pattern = paste0("^", basename(db_offsets_tmp_path), "(\\.wal)?$"), full.names = TRUE))
 
-# remove the lock so other processes can run
-file.remove(duckdb_lock_file)
+  db_offsets_conn = dbConnect(duckdb(db_offsets_tmp_path))
+  # if this query needs more memory than is available, DuckDB spills to disk; keep that on fast local storage
+  dbExecute(db_offsets_conn, paste0("SET temp_directory = ", dbQuoteString(db_offsets_conn, normalizePath(file.path(offset_dir, "duckdb_tmp"), winslash = "/", mustWork = FALSE))))
+
+  dbExecute(db_offsets_conn, offsets_query)
+  n_mismatch = dbGetQuery(db_offsets_conn, "SELECT count(*) AS n FROM offsets WHERE NOT ids_match")$n
+  if (n_mismatch == 0) dbExecute(db_offsets_conn, "ALTER TABLE offsets DROP COLUMN ids_match")
+  dbDisconnect(db_offsets_conn, shutdown = TRUE)
+
+  if (n_mismatch > 0) {
+    file.remove(db_offsets_tmp_path)
+    stop(n_mismatch, " rows had mismatched survey_ids across the per-species offset files (were some files made ",
+         "from a different visit_cov, e.g. with SKIP_EXISTING_OFFSETS = TRUE?). No offsets database was written.")
+  }
+
+  if (file.exists(db_offsets_path)) file.remove(db_offsets_path)
+  file.rename(db_offsets_tmp_path, db_offsets_path)
+  message("Offsets written to ", db_offsets_path)
+} else {
+  message("No offset files were produced; no offsets database was written")
+}
