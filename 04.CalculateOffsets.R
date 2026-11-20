@@ -13,6 +13,11 @@ library(doParallel)
 
 lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
+# Choose whether to run a small test ----
+#A test uses the BAM test database, calculates offsets only for species in the
+#test bird table, and writes to a separate test offsets database.
+test.run = FALSE
+
 FIR = str_detect(getwd(), "^/project")
 if (!FIR) {
   root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
@@ -40,15 +45,19 @@ v.prism = "2026-10-09"
 # Folder for per-species offset files (one parquet file per species), stamped with the data versions so
 # files from different dataset versions are never mixed. These are assembled into a single "offsets"
 # table at the end of the script.
-offset_dir = file.path(ifelse(FIR, "/scratch/pt1/bam/offsets_parquet", "offsets_parquet"),
-                       paste0("WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism))
+offset_dir = if (test.run) {
+  file.path(root, "test", "offsets_parquet")
+} else {
+  file.path(ifelse(FIR, "/scratch/pt1/bam/offsets_parquet", "offsets_parquet"),
+            paste0("WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism))
+}
 dir.create(offset_dir, recursive = TRUE, showWarnings = FALSE)
 
 # If TRUE, species that already have a file in offset_dir are not recalculated (useful for resuming a
 # run that stopped partway). Leave FALSE if anything upstream (data, covariates, fits, code) has changed.
 SKIP_EXISTING_OFFSETS = FALSE
 
-duckdb_lock_file = "duckdb_bam_lock.csv"
+duckdb_lock_file = ifelse(test.run, "duckdb_bam_test_lock.csv", "duckdb_bam_lock.csv")
 
 # if there's already a lock file, just run this again and again and wait. Add an extra Sys.sleep to space out in case a bunch of jobs make the file at the same time
 Sys.sleep(runif(1, 0, 30))
@@ -59,15 +68,29 @@ write_csv(data.frame(0), duckdb_lock_file)
 
 # Read in QPAD data and filter to "useful" observations with distance / time info ----
 
-db_conn_path = file.path(root, paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+db_conn_path = if (test.run) {
+  file.path(root, "test", "03_QPADDataset_test.duckdb")
+} else {
+  file.path(root, paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+}
 db_conn = dbConnect(duckdb(db_conn_path))
 dbExecute(db_conn, "LOAD spatial") # have to do this for whatever reason
 
-db_bam_conn_path = file.path(root, paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+db_bam_conn_path = if (test.run) {
+  file.path(root, "test", "03_BAMDataset_test.duckdb")
+} else {
+  file.path(root, paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+}
 db_bam_conn = dbConnect(duckdb(db_bam_conn_path))
 dbExecute(db_bam_conn, "LOAD spatial") # have to do this for whatever reason
 
 visit = ddbs_read_table(db_bam_conn, name = "visit")
+if (test.run) {
+  test_species = dbGetQuery(
+    db_bam_conn,
+    "SELECT DISTINCT species FROM bird"
+  )$species
+}
 
 # disconnect!
 dbDisconnect(db_conn)
@@ -116,6 +139,7 @@ all_species_df = read_csv(file.path(qpad_report_dir, "reports", "qpad_report_202
 all_species = all_species_df %>%
   dplyr::filter(!is.na(species_code)) %>%
   pull(species_code)
+if (test.run) all_species = all_species[all_species %in% test_species]
 
 # Set up parallelization
 ncores = as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK")) * as.numeric(Sys.getenv("SLURM_NTASKS_PER_NODE"))
@@ -228,7 +252,11 @@ offsets_query = paste0("CREATE TABLE offsets AS\n",
 # "<file>.tmp" and only renamed to the final name once it passes the survey_id check, so an existing
 # offsets file is replaced only by a complete, verified one.
 
-db_offsets_path = file.path(root, paste0("04_OffsetsDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+db_offsets_path = if (test.run) {
+  file.path(root, "test", "04_OffsetsDataset_test.duckdb")
+} else {
+  file.path(root, paste0("04_OffsetsDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb"))
+}
 db_offsets_tmp_path = paste0(db_offsets_path, ".tmp")
 
 if (length(offset_files) > 0) {

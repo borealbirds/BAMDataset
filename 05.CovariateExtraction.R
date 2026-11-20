@@ -155,9 +155,9 @@ if (workflow.mode != "drac_worker") {
   #stage.outputs <- c("scanfi_biomass", "scanfi_age", "scanfi_landcover")
 
   #5. Choose whether to run a small test----
-  #A test uses only the first test.n.surveys visits, ignores existing
-  #covariates, writes to a separate checkpoint directory, and cannot update
-  #the shared DuckDB.
+  #A test uses the dedicated BAM test database and only its first
+  #test.n.surveys visits, ignores existing covariates, and writes to a separate
+  #checkpoint directory. It can update the test DuckDB when requested below.
   test.run <- TRUE
   test.n.surveys <- 1000L
 
@@ -208,10 +208,14 @@ if (workflow.mode != "drac_worker") {
   }
 
   #2. Locate the BAMDataset DuckDB----
-  default.database.path <- file.path(
-    root,
-    paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
-  )
+  default.database.path <- if (test.run) {
+    file.path(root, "test", "03_BAMDataset_test.duckdb")
+  } else {
+    file.path(
+      root,
+      paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, ".duckdb")
+    )
+  }
   database.path <- Sys.getenv(
     "BAM_DATASET_DATABASE",
     unset = default.database.path
@@ -557,10 +561,7 @@ if (workflow.mode != "drac_worker") {
 
     #WRITE COVARIATE TABLE################
 
-    #1. Protect test and no-change workflows----
-    if (write.covariate.table && test.run) {
-      stop("Set test.run to FALSE before writing the covariate table")
-    }
+    #1. Protect no-change workflows----
     if (write.covariate.table && is.null(stage.covariates)) {
       message("No completed stage is available; DuckDB was not changed.")
     }
