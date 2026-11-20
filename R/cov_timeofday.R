@@ -21,13 +21,13 @@ cov_tod_bin = function(cov_name) {
     tz_error = str_detect(tz_vals, "; ")
     tz_fix = str_split_i(tz_vals, "; ", 1)
     
-    dates_forced = force_tzs(t, tz_fix)
+    dates_forced = force_tzs_bam(t, tz_fix)
     
     solar_data = data.frame(date = as.Date(dates_forced),
                             lat = xy_proj_crds[, 2],
                             lon = xy_proj_crds[, 1])
   
-    sun_times = suncalc::getSunlightTimes(data = solar_data) %>%
+    sun_times = get_sunlight_times_bam(data = solar_data) %>%
       mutate(t = dates_forced,
              t_since_sunrise = diff_fun(t, sunrise),
              t_since_goldenend = diff_fun(t, goldenHourEnd),
@@ -72,13 +72,13 @@ cov_timeofday = function(cov_name,
     
     # get time zone associated with each time (we assume the times are in local time but need a time zone)
     tz_vals = lutz::tz_lookup(xy_proj, warn = FALSE, method = "accurate")
-    dates_forced = force_tzs(t, tz_vals)
+    dates_forced = force_tzs_bam(t, tz_vals)
     
     solar_data = data.frame(date = as.Date(t),
                             lat = xy_proj_crds[, 2],
                             lon = xy_proj_crds[, 1])
     
-    sun_times = suncalc::getSunlightTimes(data = solar_data, keep = type)[, 4]
+    sun_times = get_sunlight_times_bam(data = solar_data, keep = type)[, 4]
     as.numeric(difftime(dates_forced, sun_times, units = units))
     
   }

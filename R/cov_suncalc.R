@@ -28,7 +28,7 @@ cov_suncalc = function(cov_name,
     
     # get time zone associated with each time (we assume the times are in local time but need a time zone)
     tz_vals = tz_lookup(xy_proj, warn = FALSE)
-    dates_forced = force_tzs(t, tz_vals)
+    dates_forced = force_tzs_bam(t, tz_vals)
     
     solar_data = data.frame(date = dates_forced,
                             lat = xy_proj_crds[, 2],
