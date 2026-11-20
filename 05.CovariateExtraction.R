@@ -1,6 +1,6 @@
 # ---
 # title: BAM dataset - extract covariates
-# author: Elly Knight
+# author: Elly Knight & Codex Sol 5.6
 # created: September 2, 2026
 # updated: September 26, 2026
 # ---
@@ -158,7 +158,7 @@ if (workflow.mode != "drac_worker") {
   #A test uses only the first test.n.surveys visits, ignores existing
   #covariates, writes to a separate checkpoint directory, and cannot update
   #the shared DuckDB.
-  test.run <- FALSE
+  test.run <- TRUE
   test.n.surveys <- 1000L
 
   #6. Choose whether existing output columns may be replaced----
