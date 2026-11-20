@@ -31,15 +31,22 @@ lapply(list.files("R", pattern = "\\.R", full.names = TRUE), source)
 
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
-dat_assess_dir = "G:/Shared drives/BAM_AvianData/Data Sharing/Dataset Assessment/Exclusion"
+dat_assess_dir <- "G:/Shared drives/BAM_AvianData/Data Sharing/Dataset Assessment/Exclusion"
 
-#3. Set the WildTrax version ----
+#3. Choose whether to run a small test----
+#A test uses the WildTrax test database and a reproducible random sample of
+#complete eBird checklists. Test outputs are written to separate DuckDB files.
+test.run <- TRUE
+test.n.ebird.checklists <- 1000
+test.seed <- 123
+
+#4. Set the WildTrax version ----
 v.wt <- "2026-08-26"
 
-#4. Set the eBird version ----
+#5. Set the eBird version ----
 v.ebd <- "Jun-2026"
 
-#5. Login to WildTrax----
+#6. Login to WildTrax----
 source("WTlogin.R")
 wt_auth()
 
@@ -168,12 +175,16 @@ wt_replace_tmtt <- function(data, calc = "round") {
 # WILDTRAX DATA WRANGLING #################
 
 #1. Get the downloaded data object ----
-db_conn_path <- file.path(
-  root,
-  "WildTrax",
-  v.wt,
-  paste0("01_wildtrax_raw_", v.wt, ".duckdb")
-)
+db_conn_path <- if (test.run) {
+  file.path(root, "WildTrax", "test", "01_wildtrax_raw_test.duckdb")
+} else {
+  file.path(
+    root,
+    "WildTrax",
+    v.wt,
+    paste0("01_wildtrax_raw_", v.wt, ".duckdb")
+  )
+}
 db_conn <- dbConnect(duckdb(db_conn_path))
 
 bad_tasks <- read_xlsx(file.path(
@@ -533,6 +544,16 @@ ebd.unique <- fread(file.path(
   paste0("03_ebd_filtered_ALL_", v.ebd, ".csv")
 ))
 
+if (test.run) {
+  set.seed(test.seed)
+  test.checklists <- sample(
+    sort(unique(ebd.unique$checklist_id)),
+    test.n.ebird.checklists
+  )
+  ebd.unique <- ebd.unique |>
+    dplyr::filter(checklist_id %in% test.checklists)
+}
+
 spp_qpad <- read.csv(file.path(root, "qpad_eligible_species_2026-08-26.csv"))
 
 #take out duplicates of scientific name
@@ -634,65 +655,83 @@ ebd.tidy <- ebd.unique %>%
 
 #1. Tidy PRISM data ----
 
-v.prism = "2026-10-09"
+v.prism <- "2026-10-09"
 
-prism_raw = read_csv("G:/Shared drives/BAM_AvianData/Waterbirds/sourceData/CWS-PRISM/PRISM-Arctic/Arctic_PRISM_Surveys_Tier1_Birds_Data_Données.csv")
-prism_locs = st_read("G:/Shared drives/BAM_AvianData/Waterbirds/sourceData/CWS-PRISM/PRISM-Arctic/Arctic_PRISM_Surveys_Tier1_Plots.shp")
+prism_raw <- read_csv(
+  "G:/Shared drives/BAM_AvianData/Waterbirds/sourceData/CWS-PRISM/PRISM-Arctic/Arctic_PRISM_Surveys_Tier1_Birds_Data_Données.csv"
+)
+prism_locs <- st_read(
+  "G:/Shared drives/BAM_AvianData/Waterbirds/sourceData/CWS-PRISM/PRISM-Arctic/Arctic_PRISM_Surveys_Tier1_Plots.shp"
+)
 
-prism_areas = st_area(prism_locs)
+prism_areas <- st_area(prism_locs)
 
-prism_centroids = prism_locs %>%
+prism_centroids <- prism_locs %>%
   st_centroid %>%
   st_coordinates %>%
   as.data.frame %>%
   set_names("longitude", "latitude") %>%
   mutate(area = prism_areas)
 
-prism_locs_coords = prism_locs %>%
+prism_locs_coords <- prism_locs %>%
   st_drop_geometry %>%
   cbind(prism_centroids) %>%
   mutate(Plot_ID = as.numeric(str_split_i(id, "ID_", 2))) %>%
-  dplyr::select(Plot_ID,
-                longitude,
-                latitude,
-                area)
+  dplyr::select(Plot_ID, longitude, latitude, area)
 
-prism.tidy = prism_raw %>%
+prism.tidy <- prism_raw %>%
   left_join(prism_locs_coords, by = join_by(Plot_ID == Plot_ID)) %>%
   group_by(ContactID, ECCC_species_code) %>%
   # only use adult individuals here?
   mutate(all_counts = sum(Total_Individuals_Adult)) %>%
   ungroup %>%
   distinct(ContactID, ECCC_species_code, .keep_all = TRUE) %>%
-  mutate(data_source = "PRISM",
-         sensor = "PRISM",
-         organization = "CWS-PRISM",
-         project_id = 99998,
-         location_id = Plot_ID,
-         location_buffer_m = 0,
-         longitude = longitude,
-         latitude = latitude,
-         survey_id = paste0("PRISM_", ContactID),
-         date_time = as.POSIXct(paste0(Survey_year, "-", sprintf("%02d", Survey_month), "-", sprintf("%02d", Survey_day), " ", Start_Time_1), 
-                                format = "%Y-%m-%d %H:%M:%OS",
-                                tz = "UTC"),
-         status = NA,
-         method = "PRISM",
-         duration = Survey_Duration_Hrs * 60,
-         # This takes the PRISM effective area and converts it to the radius of an equal-area circle
-         distance = as.numeric(sqrt(area * Plot_Area_Proportion_Surveyed / pi)),
-         max_noise_type = "",
-         max_noise_volume = "",
-         species = ECCC_species_code,
-         # Assume it's true
-         flag_err_date = FALSE,
-         flag_err_loc = FALSE,
-         flag_noise = FALSE,
-         flag_task_wt = FALSE,
-         flag_manual = FALSE,
-         count = all_counts,
-         .keep = "none") %>%
-  dplyr::filter(!is.na(longitude), !is.na(latitude), !is.na(date_time), count > 0)
+  mutate(
+    data_source = "PRISM",
+    sensor = "PRISM",
+    organization = "CWS-PRISM",
+    project_id = 99998,
+    location_id = Plot_ID,
+    location_buffer_m = 0,
+    longitude = longitude,
+    latitude = latitude,
+    survey_id = paste0("PRISM_", ContactID),
+    date_time = as.POSIXct(
+      paste0(
+        Survey_year,
+        "-",
+        sprintf("%02d", Survey_month),
+        "-",
+        sprintf("%02d", Survey_day),
+        " ",
+        Start_Time_1
+      ),
+      format = "%Y-%m-%d %H:%M:%OS",
+      tz = "UTC"
+    ),
+    status = NA,
+    method = "PRISM",
+    duration = Survey_Duration_Hrs * 60,
+    # This takes the PRISM effective area and converts it to the radius of an equal-area circle
+    distance = as.numeric(sqrt(area * Plot_Area_Proportion_Surveyed / pi)),
+    max_noise_type = "",
+    max_noise_volume = "",
+    species = ECCC_species_code,
+    # Assume it's true
+    flag_err_date = FALSE,
+    flag_err_loc = FALSE,
+    flag_noise = FALSE,
+    flag_task_wt = FALSE,
+    flag_manual = FALSE,
+    count = all_counts,
+    .keep = "none"
+  ) %>%
+  dplyr::filter(
+    !is.na(longitude),
+    !is.na(latitude),
+    !is.na(date_time),
+    count > 0
+  )
 
 #COMBINE##############
 
@@ -1094,14 +1133,43 @@ visit_sf <- st_as_sf(
 
 ## write to duckdb databases - for QPAD and for models ----
 
-db_conn_path_qpad <- file.path(
-  root,
-  paste0("03_QPADDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb")
-)
-db_conn_path_models <- file.path(
-  root,
-  paste0("03_BAMDataset_WT-", v.wt, "_EBd-", v.ebd, "_PRISM-", v.prism, ".duckdb")
-)
+if (test.run) {
+  test.output.directory <- file.path(root, "test")
+  dir.create(test.output.directory, showWarnings = FALSE)
+  db_conn_path_qpad <- file.path(
+    test.output.directory,
+    "03_QPADDataset_test.duckdb"
+  )
+  db_conn_path_models <- file.path(
+    test.output.directory,
+    "03_BAMDataset_test.duckdb"
+  )
+} else {
+  db_conn_path_qpad <- file.path(
+    root,
+    paste0(
+      "03_QPADDataset_WT-",
+      v.wt,
+      "_EBd-",
+      v.ebd,
+      "_PRISM-",
+      v.prism,
+      ".duckdb"
+    )
+  )
+  db_conn_path_models <- file.path(
+    root,
+    paste0(
+      "03_BAMDataset_WT-",
+      v.wt,
+      "_EBd-",
+      v.ebd,
+      "_PRISM-",
+      v.prism,
+      ".duckdb"
+    )
+  )
+}
 
 ### qpad first! ----
 
@@ -1132,4 +1200,8 @@ dbExecute(db_conn_models, "LOAD spatial") # have to do this for whatever reason
 # write the other files
 dbWriteTable(db_conn_models, name = "bird", bird)
 dbWriteTable(db_conn_models, name = "count_limits", count_limits)
-dbWriteTable(db_conn_models, name = "output_check_summary", output_check_summary)
+dbWriteTable(
+  db_conn_models,
+  name = "output_check_summary",
+  output_check_summary
+)

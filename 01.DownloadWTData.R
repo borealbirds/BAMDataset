@@ -33,7 +33,14 @@ library(duckspatial)
 #2. Set root path for data on google drive----
 root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
-#3. Set the snapshot date----
+#3. Choose whether to run a small test----
+#A test uses a reproducible random sample of ARU and point-count projects and
+#writes to separate checkpoints and a separate DuckDB.
+test.run <- TRUE
+test.n.projects.per.sensor <- 5
+test.seed <- 123
+
+#4. Set the snapshot date----
 #Set BAM_WT_SNAPSHOT_DATE to an existing YYYY-MM-DD snapshot to resume a run
 #on a later day. If it is unset, a new snapshot is started using today's date.
 snapshot.date <- as.Date(Sys.getenv(
@@ -44,7 +51,11 @@ if (is.na(snapshot.date)) {
   stop("BAM_WT_SNAPSHOT_DATE must use YYYY-MM-DD format")
 }
 
-out.dir <- file.path(root, "WildTrax", as.character(snapshot.date))
+out.dir <- if (test.run) {
+  file.path(root, "WildTrax", "test")
+} else {
+  file.path(root, "WildTrax", as.character(snapshot.date))
+}
 cache.dir <- file.path(out.dir, "report_cache")
 dir.create(cache.dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -52,7 +63,7 @@ dir.create(cache.dir, recursive = TRUE, showWarnings = FALSE)
 #one project download before retrying it.
 download.timeout.seconds <- 30 * 60
 
-#4. Login to WildTrax----
+#5. Login to WildTrax----
 source("WTlogin.R")
 wt_auth()
 
@@ -65,16 +76,34 @@ proj.aru <- wt_get_projects("ARU")
 proj.pc <- wt_get_projects("PC")
 
 #2. Get list for exclusion for CWS-PRA ----
-ex <- read_excel(file.path("G:/Shared drives/BAM_AvianData/Data Sharing", "Dataset Assessment", "Exclusion", "CWS-PRA_projects_Apr2026.xlsx")) |> 
-  dplyr::filter(Sharing=="Exclude")
+ex <- read_excel(file.path(
+  "G:/Shared drives/BAM_AvianData/Data Sharing",
+  "Dataset Assessment",
+  "Exclusion",
+  "CWS-PRA_projects_Apr2026.xlsx"
+)) |>
+  dplyr::filter(Sharing == "Exclude")
 
 #3. Filter project list ----
 #remove certain project statuses for CWS-ONT as per preferences
-proj <- rbind(proj.aru, proj.pc) |> 
-  dplyr::filter(project_status!="Test Only",
-                tasks_completed > 0,
-                !project_id %in% ex$project_id,
-                !(organization_name=="CWS-ONT" & project_status %in% c("Active", "Published = Private")))
+proj <- rbind(proj.aru, proj.pc) |>
+  dplyr::filter(
+    project_status != "Test Only",
+    tasks_completed > 0,
+    !project_id %in% ex$project_id,
+    !(organization_name == "CWS-ONT" &
+      project_status %in% c("Active", "Published = Private"))
+  )
+
+#4. Subsample projects for a test run ----
+if (test.run) {
+  set.seed(test.seed)
+  proj <- proj |>
+    arrange(project_sensor, project_id) |>
+    group_by(project_sensor) |>
+    slice_sample(n = test.n.projects.per.sensor) |>
+    ungroup()
+}
 
 #DOWNLOAD ###############
 
@@ -151,11 +180,14 @@ extract.report <- function(download, report, n_requested) {
     #the remaining report to a data frame. Identify that report from fields
     #that occur only in the AI output so the available table is still saved.
     returned.report <- if (
-      any(c(
-        "confidence",
-        "version",
-        "is_species_allowed_in_project"
-      ) %in% names(download))
+      any(
+        c(
+          "confidence",
+          "version",
+          "is_species_allowed_in_project"
+        ) %in%
+          names(download)
+      )
     ) {
       "ai"
     } else {
@@ -233,8 +265,12 @@ for (i in seq_len(n_proj)) {
 
   if (!length(missing.reports)) {
     message(
-      "Using cached reports for dataset ", proj$project[[i]],
-      " : ", i, " of ", n_proj
+      "Using cached reports for dataset ",
+      proj$project[[i]],
+      " : ",
+      i,
+      " of ",
+      n_proj
     )
     next
   }
@@ -279,8 +315,12 @@ for (i in seq_len(n_proj)) {
   }
 
   message(
-    "Finished dataset ", proj$project[[i]],
-    " : ", i, " of ", n_proj
+    "Finished dataset ",
+    proj$project[[i]],
+    " : ",
+    i,
+    " of ",
+    n_proj
   )
 }
 
@@ -314,6 +354,17 @@ for (i in seq_along(manual.files)) {
   sensor <- toupper(file.parts[1, 2])
   project.id <- file.parts[1, 3]
   report <- tolower(file.parts[1, 4])
+
+  #Only incorporate manual reports belonging to this run's project inventory.
+  if (
+    !any(
+      proj$project_sensor == sensor &
+        as.character(proj$project_id) == project.id
+    )
+  ) {
+    next
+  }
+
   path <- checkpoint.path(sensor, project.id, report)
 
   if (file.exists(path)) {
@@ -342,9 +393,15 @@ pc.main.paths <- list.files(
   full.names = TRUE
 )
 
-if (!length(aru.main.paths)) stop("No ARU main reports were downloaded")
-if (!length(aru.ai.paths)) stop("No ARU AI reports were downloaded")
-if (!length(pc.main.paths)) stop("No point-count main reports were downloaded")
+if (!length(aru.main.paths)) {
+  stop("No ARU main reports were downloaded")
+}
+if (!length(aru.ai.paths)) {
+  stop("No ARU AI reports were downloaded")
+}
+if (!length(pc.main.paths)) {
+  stop("No point-count main reports were downloaded")
+}
 
 #3. Assemble the smaller main reports in memory ----
 #The much larger AI reports are copied directly from their Parquet checkpoints
@@ -395,7 +452,11 @@ pc.sf <- st_as_sf(pc.df, coords = c("longitude", "latitude"), crs = UTM_CRS)
 
 db.conn.path <- file.path(
   out.dir,
-  paste0("01_wildtrax_raw_", snapshot.date, ".duckdb")
+  if (test.run) {
+    "01_wildtrax_raw_test.duckdb"
+  } else {
+    paste0("01_wildtrax_raw_", snapshot.date, ".duckdb")
+  }
 )
 
 # make connection
@@ -418,6 +479,7 @@ dbWriteTable(db.conn, name = "project_inventory", proj, overwrite = TRUE)
 dbWriteTable(db.conn, name = "error_log", error.log, overwrite = TRUE)
 
 message("WildTrax snapshot written to: ", db.conn.path)
+message("Test run: ", test.run)
 message("ARU main project reports: ", length(aru.main.paths))
 message("ARU AI project reports: ", length(aru.ai.paths))
 message("Point-count main project reports: ", length(pc.main.paths))
