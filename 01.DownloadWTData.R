@@ -36,7 +36,7 @@ root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 #3. Choose whether to run a small test----
 #A test uses a reproducible random sample of ARU and point-count projects and
 #writes to separate checkpoints and a separate DuckDB.
-test.run <- TRUE
+test.run <- FALSE
 test.n.projects.per.sensor <- 5
 test.seed <- 123
 

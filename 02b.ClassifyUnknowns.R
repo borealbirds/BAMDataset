@@ -29,10 +29,10 @@ root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 
 #3. Choose whether to run a small test----
 #A test uses the WildTrax test database and writes to a separate test DuckDB.
-test.run <- TRUE
+test.run <- FALSE
 
 #4. Set the WildTrax version----
-v.wt <- "2026-08-26"
+v.wt <- "2026-11-20"
 
 #5. Set classifier decision values----
 classifier.version <- "Hawkears v1.0.8"
@@ -114,145 +114,207 @@ candidate.species <- function(
 ) {
   #UNQK is treated as UNDU. Geese, brant, and swans are not duck candidates.
   if (normalized.code == "UNDU") {
-    return(spp |>
-      dplyr::filter(
-        species_family == "Anatidae",
-        !str_detect(species_common_name, regex(
-          "goose|brant|swan",
-          ignore_case = TRUE
-        ))
-      ) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family == "Anatidae",
+          !str_detect(
+            species_common_name,
+            regex(
+              "goose|brant|swan",
+              ignore_case = TRUE
+            )
+          )
+        ) |>
+        pull(species_code)
+    )
   }
 
   #An unidentified trill is restricted to warblers and sparrows.
   if (annotation.code == "UNTR") {
-    return(spp |>
-      dplyr::filter(
-        species_family %in% c(
-          "Parulidae",
-          "Passerellidae",
-          "Emberizidae"
-        )
-      ) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family %in%
+            c(
+              "Parulidae",
+              "Passerellidae",
+              "Emberizidae"
+            )
+        ) |>
+        pull(species_code)
+    )
   }
 
   #These broader groups do not contain enough taxonomy in the WildTrax row to
   #derive their candidates without a small interpretation rule.
   if (annotation.code == "UNBP") {
-    return(spp |>
-      dplyr::filter(species_order %in% c(
-        "Accipitriformes",
-        "Falconiformes"
-      )) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_order %in%
+            c(
+              "Accipitriformes",
+              "Falconiformes"
+            )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "URPT") {
-    return(spp |>
-      dplyr::filter(species_order %in% c(
-        "Accipitriformes",
-        "Falconiformes",
-        "Strigiformes"
-      )) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_order %in%
+            c(
+              "Accipitriformes",
+              "Falconiformes",
+              "Strigiformes"
+            )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UNIWBI") {
-    return(spp |>
-      dplyr::filter(species_family %in% c(
-        "Ardeidae",
-        "Threskiornithidae",
-        "Threskiornithinae",
-        "Ciconiidae"
-      )) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family %in%
+            c(
+              "Ardeidae",
+              "Threskiornithidae",
+              "Threskiornithinae",
+              "Ciconiidae"
+            )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UNSH") {
-    return(spp |>
-      dplyr::filter(species_family %in% c(
-        "Scolopacidae",
-        "Charadriidae",
-        "Recurvirostridae",
-        "Haematopodidae",
-        "Jacanidae"
-      )) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family %in%
+            c(
+              "Scolopacidae",
+              "Charadriidae",
+              "Recurvirostridae",
+              "Haematopodidae",
+              "Jacanidae"
+            )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UPEE") {
-    return(spp |>
-      dplyr::filter(scientific_genus == "Calidris") |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(scientific_genus == "Calidris") |>
+        pull(species_code)
+    )
   }
 
   #Use the more specific waterfowl and larid meanings where the unknown row
   #only supplies a shared family.
   if (annotation.code == "UNGO") {
-    return(spp |>
-      dplyr::filter(
-        species_family == "Anatidae",
-        str_detect(species_common_name, regex(
-          "goose|brant",
-          ignore_case = TRUE
-        ))
-      ) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family == "Anatidae",
+          str_detect(
+            species_common_name,
+            regex(
+              "goose|brant",
+              ignore_case = TRUE
+            )
+          )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "USWN") {
-    return(spp |>
-      dplyr::filter(scientific_genus == "Cygnus") |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(scientific_genus == "Cygnus") |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UDAB") {
-    return(spp |>
-      dplyr::filter(scientific_genus %in% c(
-        "Aix",
-        "Anas",
-        "Mareca",
-        "Spatula"
-      )) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          scientific_genus %in%
+            c(
+              "Aix",
+              "Anas",
+              "Mareca",
+              "Spatula"
+            )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UDIV") {
-    return(spp |>
-      dplyr::filter(
-        species_family == "Anatidae",
-        !scientific_genus %in% c("Aix", "Anas", "Mareca", "Spatula"),
-        !str_detect(species_common_name, regex(
-          "goose|brant|swan",
-          ignore_case = TRUE
-        ))
-      ) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family == "Anatidae",
+          !scientific_genus %in% c("Aix", "Anas", "Mareca", "Spatula"),
+          !str_detect(
+            species_common_name,
+            regex(
+              "goose|brant|swan",
+              ignore_case = TRUE
+            )
+          )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UNME") {
-    return(spp |>
-      dplyr::filter(str_detect(species_common_name, regex(
-        "merganser",
-        ignore_case = TRUE
-      ))) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(str_detect(
+          species_common_name,
+          regex(
+            "merganser",
+            ignore_case = TRUE
+          )
+        )) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UNGU") {
-    return(spp |>
-      dplyr::filter(
-        species_family == "Laridae",
-        str_detect(species_common_name, regex(
-          "gull|kittiwake",
-          ignore_case = TRUE
-        ))
-      ) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family == "Laridae",
+          str_detect(
+            species_common_name,
+            regex(
+              "gull|kittiwake",
+              ignore_case = TRUE
+            )
+          )
+        ) |>
+        pull(species_code)
+    )
   }
   if (annotation.code == "UNTE") {
-    return(spp |>
-      dplyr::filter(
-        species_family == "Laridae",
-        str_detect(species_common_name, regex(
-          "tern",
-          ignore_case = TRUE
-        ))
-      ) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(
+          species_family == "Laridae",
+          str_detect(
+            species_common_name,
+            regex(
+              "tern",
+              ignore_case = TRUE
+            )
+          )
+        ) |>
+        pull(species_code)
+    )
   }
 
   scientific.matches <- scientific.candidates(
@@ -268,15 +330,19 @@ candidate.species <- function(
       unknown.family != "" &&
       unknown.family != "None"
   ) {
-    return(spp |>
-      dplyr::filter(species_family == unknown.family) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(species_family == unknown.family) |>
+        pull(species_code)
+    )
   }
 
   if (!is.na(unknown.order) && unknown.order != "") {
-    return(spp |>
-      dplyr::filter(species_order == unknown.order) |>
-      pull(species_code))
+    return(
+      spp |>
+        dplyr::filter(species_order == unknown.order) |>
+        pull(species_code)
+    )
   }
 
   character()
@@ -308,11 +374,12 @@ unknown.categories <- spp.wt |>
     unknown_order = species_order,
     unknown_family = species_family,
     unknown_scientific_name = species_scientific_name,
-    use_for_reclassification = !species_code %in% c(
-      "UNBI",
-      "178",
-      "183"
-    ),
+    use_for_reclassification = !species_code %in%
+      c(
+        "UNBI",
+        "178",
+        "183"
+      ),
     exclusion_reason = case_when(
       species_code == "UNBI" ~ "unbounded_unknown_bird",
       species_code %in% c("178", "183") ~ "legacy_numeric_code",
@@ -340,17 +407,19 @@ spp.known <- spp.wt |>
 #4. Derive candidate species for every usable unknown category----
 candidate.lookup <- unknown.categories |>
   dplyr::filter(use_for_reclassification) |>
-  mutate(candidate_species_code = pmap(
-    list(
-      annotation_species_code,
-      normalized_unknown_code,
-      unknown_order,
-      unknown_family,
-      unknown_scientific_name
-    ),
-    candidate.species,
-    spp = spp.known
-  )) |>
+  mutate(
+    candidate_species_code = pmap(
+      list(
+        annotation_species_code,
+        normalized_unknown_code,
+        unknown_order,
+        unknown_family,
+        unknown_scientific_name
+      ),
+      candidate.species,
+      spp = spp.known
+    )
+  ) |>
   dplyr::select(
     annotation_species_code,
     normalized_unknown_code,
@@ -437,7 +506,7 @@ obsolete.tables <- c(
 )
 walk(
   obsolete.tables,
-  ~dbExecute(db.conn, paste("DROP TABLE IF EXISTS", .x))
+  ~ dbExecute(db.conn, paste("DROP TABLE IF EXISTS", .x))
 )
 
 unknown.species.lookup <- unknown.categories |>
