@@ -419,24 +419,58 @@ output.database <- if (test.run) {
 
 dir.create(dirname(output.database), recursive = TRUE, showWarnings = FALSE)
 
-#2. Save the lookups used for this run----
+#2. Save the lookup used for this run----
 db.conn <- dbConnect(duckdb(), dbdir = output.database)
 dbExecute(
   db.conn,
   paste0("ATTACH ", sql.path(input.database), " AS raw (READ_ONLY)")
 )
 
+#Remove tables written by earlier versions of this script. These objects are
+#now either combined below or used only as temporary processing tables.
+obsolete.tables <- c(
+  "unknown_categories",
+  "candidate_species_lookup",
+  "unknown_classifier_scores",
+  "unknown_classification_decisions",
+  "unknown_reclassification_summary"
+)
+walk(
+  obsolete.tables,
+  ~dbExecute(db.conn, paste("DROP TABLE IF EXISTS", .x))
+)
+
+unknown.species.lookup <- unknown.categories |>
+  left_join(
+    candidate.lookup,
+    by = c(
+      "annotation_species_code",
+      "normalized_unknown_code"
+    )
+  )
+
 dbWriteTable(
   db.conn,
-  name = "unknown_categories",
-  value = unknown.categories,
+  name = "unknown_species_lookup",
+  value = unknown.species.lookup,
   overwrite = TRUE
+)
+
+#The two separate versions are retained temporarily because they make the SQL
+#joins below simpler. They disappear when the database connection is closed.
+dbWriteTable(
+  db.conn,
+  name = "unknown_categories_temp",
+  value = unknown.categories,
+  overwrite = TRUE,
+  temporary = TRUE
 )
 dbWriteTable(
   db.conn,
-  name = "candidate_species_lookup",
+  name = "candidate_species_lookup_temp",
   value = candidate.lookup,
-  overwrite = TRUE
+  overwrite = TRUE,
+  temporary = TRUE
 )
 
 #3. Select the unknown annotations----
@@ -453,14 +487,15 @@ dbExecute(
     a.species_code AS annotation_species_code,
     c.normalized_unknown_code,
     a.species_common_name AS annotation_common_name,
+    c.use_for_reclassification,
+    c.exclusion_reason,
     a.detection_time AS tag_start,
     COALESCE(a.tag_duration, 0) AS tag_duration,
     a.detection_time + COALESCE(a.tag_duration, 0) AS tag_end,
     a.abundance
   FROM raw.aru a
-  INNER JOIN unknown_categories c
+  INNER JOIN unknown_categories_temp c
     ON a.species_code = c.annotation_species_code
-  WHERE c.use_for_reclassification = TRUE
   QUALIFY ROW_NUMBER() OVER (
     PARTITION BY a.project_id, a.recording_id, a.tag_id
     ORDER BY a.detection_time
@@ -475,7 +510,7 @@ dbExecute(
   db.conn,
   paste0(
     "
-    CREATE OR REPLACE TABLE unknown_classifier_scores AS
+    CREATE OR REPLACE TEMP TABLE unknown_classifier_scores AS
     SELECT
       u.project_id,
       u.task_id,
@@ -496,7 +531,7 @@ dbExecute(
       AND ai.detection_time <= u.tag_end + ",
     time.buffer.seconds,
     "
-    INNER JOIN candidate_species_lookup l
+    INNER JOIN candidate_species_lookup_temp l
       ON u.annotation_species_code = l.annotation_species_code
       AND ai.species_code = l.candidate_species_code
     WHERE ai.version = ",
@@ -515,7 +550,7 @@ dbExecute(
   db.conn,
   paste0(
     "
-    CREATE OR REPLACE TABLE unknown_classification_decisions AS
+    CREATE OR REPLACE TABLE unknown_classification_results AS
     WITH ranked AS (
       SELECT
         *,
@@ -573,6 +608,8 @@ dbExecute(
       s.top_score - s.runner_up_score AS score_difference,
       COALESCE(s.number_candidate_species, 0) AS number_candidate_species,
       CASE
+        WHEN u.use_for_reclassification = FALSE THEN
+          COALESCE(u.exclusion_reason, 'not_eligible')
         WHEN r.recording_id IS NULL THEN 'no_classifier_report'
         WHEN s.proposed_species_code IS NULL THEN 'no_eligible_candidate'
         WHEN s.top_score <= ",
@@ -584,7 +621,8 @@ dbExecute(
         ELSE 'accepted'
       END AS decision,
       CASE
-        WHEN s.top_score > ",
+        WHEN u.use_for_reclassification = TRUE
+          AND s.top_score > ",
     minimum.score,
     "
           AND s.top_score - s.runner_up_score > ",
@@ -611,58 +649,20 @@ dbExecute(
 dbExecute(
   db.conn,
   "
-  CREATE OR REPLACE TABLE unknown_classification_results AS
-  WITH all_unknown_annotations AS (
-    SELECT
-      a.project_id,
-      a.recording_id,
-      a.tag_id,
-      a.species_code AS annotation_species_code,
-      c.normalized_unknown_code,
-      c.unknown_common_name,
-      c.use_for_reclassification,
-      c.exclusion_reason
-    FROM raw.aru a
-    INNER JOIN unknown_categories c
-      ON a.species_code = c.annotation_species_code
-    QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY a.project_id, a.recording_id, a.tag_id
-      ORDER BY a.detection_time
-    ) = 1
-  ),
-  before_counts AS (
-    SELECT
-      annotation_species_code,
-      normalized_unknown_code,
-      unknown_common_name,
-      use_for_reclassification,
-      exclusion_reason,
-      COUNT(*) AS number_unknowns_before
-    FROM all_unknown_annotations
-    GROUP BY ALL
-  ),
-  accepted_counts AS (
-    SELECT
-      annotation_species_code,
-      COUNT(*) AS number_reclassified
-    FROM unknown_classification_decisions
-    WHERE decision = 'accepted'
-    GROUP BY annotation_species_code
-  )
+  CREATE OR REPLACE TABLE unknown_classification_summary AS
   SELECT
-    b.annotation_species_code,
-    b.normalized_unknown_code,
-    b.unknown_common_name,
-    b.use_for_reclassification,
-    b.exclusion_reason,
-    b.number_unknowns_before,
-    COALESCE(a.number_reclassified, 0) AS number_reclassified,
-    b.number_unknowns_before - COALESCE(a.number_reclassified, 0)
+    annotation_species_code,
+    normalized_unknown_code,
+    annotation_common_name,
+    use_for_reclassification,
+    exclusion_reason,
+    COUNT(*) AS number_unknowns_before,
+    COUNT(*) FILTER (WHERE decision = 'accepted') AS number_reclassified,
+    COUNT(*) - COUNT(*) FILTER (WHERE decision = 'accepted')
       AS number_unknowns_after
-  FROM before_counts b
-  LEFT JOIN accepted_counts a
-    ON b.annotation_species_code = a.annotation_species_code
-  ORDER BY b.annotation_species_code
+  FROM unknown_classification_results
+  GROUP BY ALL
+  ORDER BY annotation_species_code
   "
 )
 
@@ -671,7 +671,7 @@ decision.summary <- dbGetQuery(
   db.conn,
   "
   SELECT decision, COUNT(*) AS number_annotations
-  FROM unknown_classification_decisions
+  FROM unknown_classification_results
   GROUP BY decision
   ORDER BY number_annotations DESC
   "
@@ -680,32 +680,16 @@ print(decision.summary)
 
 classification.results <- dbGetQuery(
   db.conn,
-  "SELECT * FROM unknown_classification_results"
+  "SELECT * FROM unknown_classification_summary"
 )
 print(classification.results)
 
 #8. Format accepted reclassifications for review----
-dbExecute(
-  db.conn,
-  "
-  CREATE OR REPLACE TABLE unknown_reclassification_summary AS
-  SELECT
-    annotation_species_code,
-    reclassified_species_code,
-    proposed_common_name,
-    COUNT(*) AS number_reclassified
-  FROM unknown_classification_decisions
-  WHERE decision = 'accepted'
-  GROUP BY ALL
-  ORDER BY annotation_species_code, number_reclassified DESC
-  "
-)
-
 reclassified <- dbGetQuery(
   db.conn,
   "
   SELECT *
-  FROM unknown_classification_decisions
+  FROM unknown_classification_results
   WHERE decision = 'accepted'
   ORDER BY annotation_species_code, reclassified_species_code
   "
@@ -713,7 +697,17 @@ reclassified <- dbGetQuery(
 
 reclassification.summary <- dbGetQuery(
   db.conn,
-  "SELECT * FROM unknown_reclassification_summary"
+  "
+  SELECT
+    annotation_species_code,
+    reclassified_species_code,
+    proposed_common_name,
+    COUNT(*) AS number_reclassified
+  FROM unknown_classification_results
+  WHERE decision = 'accepted'
+  GROUP BY ALL
+  ORDER BY annotation_species_code, number_reclassified DESC
+  "
 )
 print(reclassification.summary)
 
