@@ -185,6 +185,44 @@ db_conn_path <- if (test.run) {
     paste0("01_wildtrax_raw_", v.wt, ".duckdb")
   )
 }
+
+#Read accepted classifier decisions created in script 02b. The raw WildTrax
+#database remains unchanged; replacements are applied below at the tag level.
+unknown_classification_path <- if (test.run) {
+  file.path(
+    root,
+    "WildTrax",
+    "test",
+    "02b_unknown_classification_test.duckdb"
+  )
+} else {
+  file.path(
+    root,
+    "WildTrax",
+    v.wt,
+    paste0("02b_unknown_classification_", v.wt, ".duckdb")
+  )
+}
+
+unknown_classification_conn <- dbConnect(
+  duckdb(),
+  dbdir = unknown_classification_path,
+  read_only = TRUE
+)
+unknown_reclassifications <- dbGetQuery(
+  unknown_classification_conn,
+  "
+  SELECT
+    project_id,
+    recording_id,
+    tag_id,
+    reclassified_species_code
+  FROM unknown_classification_results
+  WHERE decision = 'accepted'
+  "
+)
+dbDisconnect(unknown_classification_conn, shutdown = TRUE)
+
 db_conn <- dbConnect(duckdb(db_conn_path))
 
 bad_tasks <- read_xlsx(file.path(
@@ -290,6 +328,22 @@ aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   mutate(task_duration = pmin(task_duration, MAX_ARU_TIME)) %>%
   # remove duplicate instances of the same tag_id
   distinct(tag_id, .keep_all = TRUE) %>%
+  # replace accepted unknown classifications and retain the portion of each
+  # species count that came from classifier-based replacement. Subtracting
+  # count_ai_reclassified from count recovers the human-only count.
+  left_join(
+    unknown_reclassifications,
+    by = c("project_id", "recording_id", "tag_id")
+  ) %>%
+  mutate(
+    count_ai_reclassified = ifelse(
+      !is.na(reclassified_species_code),
+      as.integer(abundance),
+      0L
+    ),
+    species_code = coalesce(reclassified_species_code, species_code)
+  ) %>%
+  dplyr::select(-reclassified_species_code) %>%
   # remove duplicate detections of the same individual by grouping along "individual_order" and selecting the minimum (first) detection
   group_by(
     project_id,
@@ -360,7 +414,11 @@ aru.tidy <- aru_qpad_ready |>
     flag_task_wt,
     flag_manual
   ) |>
-  summarize(count = sum(abundance)) |>
+  summarize(
+    count = sum(abundance),
+    count_ai_reclassified = as.integer(sum(count_ai_reclassified)),
+    .groups = "drop"
+  ) |>
   ungroup()
 
 #3. Tidy point count data ----
@@ -466,7 +524,8 @@ pc.tidy <- pc_qpad_ready %>%
   mutate(
     # these two are only for ARUs
     flag_noise = FALSE,
-    flag_task_wt = FALSE
+    flag_task_wt = FALSE,
+    count_ai_reclassified = 0L
   ) |>
   dplyr::select(all_of(colnames(aru.tidy)))
 
@@ -531,7 +590,10 @@ wt.tidy <- list(aru.tidy, pc.tidy) |>
   ) %>%
   # group together observations of the same species that are split up (e.g., from point counts with different distances) and sum
   group_by(survey_id, species) %>%
-  mutate(count = sum(count)) %>%
+  mutate(
+    count = sum(count),
+    count_ai_reclassified = as.integer(sum(count_ai_reclassified))
+  ) %>%
   ungroup %>%
   distinct(survey_id, species, .keep_all = TRUE)
 
@@ -641,6 +703,7 @@ ebd.tidy <- ebd.unique %>%
     max_noise_volume = NA_character_,
     species = species_code,
     count,
+    count_ai_reclassified = 0L,
     flag_err_date = FALSE,
     flag_err_loc = FALSE,
     flag_noise = FALSE,
@@ -724,6 +787,7 @@ prism.tidy <- prism_raw %>%
     flag_task_wt = FALSE,
     flag_manual = FALSE,
     count = all_counts,
+    count_ai_reclassified = 0L,
     .keep = "none"
   ) %>%
   dplyr::filter(
@@ -803,7 +867,7 @@ nrow(survey_species_issues)
 
 # One row per survey, containing only survey-level metadata and flags. When an eBird checklist group has multiple metadata variants, retain the variant represented by the most species. The remaining fields provide deterministic tie-breakers.
 visit_core <- all.tidy |>
-  dplyr::select(-count) |>
+  dplyr::select(-count, -count_ai_reclassified) |>
   group_by(across(-species)) |>
   summarize(n_species = n(), .groups = "drop") |>
   arrange(
@@ -915,7 +979,12 @@ visit <- visit_core |>
 # quantile for species with 200-999 observations, and no automated count flag
 # below 200 observations. Retain only the logical flag in the full table.
 bird <- all.tidy |>
-  dplyr::select(survey_id, species, count) |>
+  dplyr::select(
+    survey_id,
+    species,
+    count,
+    count_ai_reclassified
+  ) |>
   group_by(species) |>
   mutate(
     flag_err_count = if (n() >= MIN_Q999_OBSERVATIONS) {
@@ -999,6 +1068,9 @@ bird_value_issues <- bird |>
       is.na(count) |
       !is.finite(count) |
       count <= 0 |
+      is.na(count_ai_reclassified) |
+      count_ai_reclassified < 0 |
+      count_ai_reclassified > count |
       is.na(flag_err_count)
   )
 nrow(bird_value_issues)
