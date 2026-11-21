@@ -684,6 +684,39 @@ classification.results <- dbGetQuery(
 )
 print(classification.results)
 
+#8. Format accepted reclassifications for review----
+dbExecute(
+  db.conn,
+  "
+  CREATE OR REPLACE TABLE unknown_reclassification_summary AS
+  SELECT
+    annotation_species_code,
+    reclassified_species_code,
+    proposed_common_name,
+    COUNT(*) AS number_reclassified
+  FROM unknown_classification_decisions
+  WHERE decision = 'accepted'
+  GROUP BY ALL
+  ORDER BY annotation_species_code, number_reclassified DESC
+  "
+)
+
+reclassified <- dbGetQuery(
+  db.conn,
+  "
+  SELECT *
+  FROM unknown_classification_decisions
+  WHERE decision = 'accepted'
+  ORDER BY annotation_species_code, reclassified_species_code
+  "
+)
+
+reclassification.summary <- dbGetQuery(
+  db.conn,
+  "SELECT * FROM unknown_reclassification_summary"
+)
+print(reclassification.summary)
+
 message("Unknown classification decisions written to: ", output.database)
 message("Test run: ", test.run)
 
