@@ -108,7 +108,7 @@ timeofday_cov = cov_tod_bin("timeofday")
 closed_cov = cov_dynamic_raster(cov_name = "open_closed", raster_dir = file.path(dat_dir, "scanfi_biomass_agg"), method = "nearest")
 road_cov = cov_static_raster(cov_name = "near_road", raster_path = file.path(dat_dir, "all_roads_buffered.tif"), na_in_domain = TRUE)
 
-visit_cov = visit %>%
+visit_cov = visit[1:1000, ] %>%
   dplyr::filter(!is.na(longitude), !is.na(latitude), !is.na(date_time)) %>%
   mutate(timeofday = timeofday_cov$get(longitude, latitude, date_time, crs_in = DEG_CRS),
          biomass = closed_cov$get(longitude, latitude, date_time, crs_in = DEG_CRS) / 200,

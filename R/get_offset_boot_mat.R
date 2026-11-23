@@ -16,6 +16,7 @@
 get_offset_boot_mat = function(dat,
                                r_pars,
                                include_road = FALSE,
+                               include_aru = FALSE,
                                tod_to_keep = NULL,
                                all_par_names = character(0),
                                chunk_size = 2e5) {
@@ -23,17 +24,18 @@ get_offset_boot_mat = function(dat,
   tod_levels = c("nauticaldawn", "sunrise", "morning", "day", "sunset", "nauticaldusk", "night")
 
   r_pars = check_names(as.data.frame(r_pars), all_par_names, fill = 0)
-  r_pars = check_names(r_pars, c(paste0("log_lambda_", tod_levels), "log_lambda_timeofyear",
+  r_pars = check_names(r_pars, c(paste0("log_lambda_", tod_levels), "log_lambda_timeofyear", "log_lambda_is_aru",
                                  "log_alpha_", "log_alpha_near_road", "log_alpha_open_closed"), fill = 0)
   n_boot = nrow(r_pars)
 
   # parameters x draws
-  B_lambda = t(as.matrix(r_pars[, c(paste0("log_lambda_", tod_levels), "log_lambda_timeofyear")]))
+  B_lambda = t(as.matrix(r_pars[, c(paste0("log_lambda_", tod_levels), "log_lambda_timeofyear", "log_lambda_is_aru")]))
   B_alpha = t(as.matrix(r_pars[, c("log_alpha_", "log_alpha_near_road", "log_alpha_open_closed")]))
 
   # surveys x parameters
   tod = as.character(dat$timeofday)
-  X_lambda = cbind(outer(tod, tod_levels, "==") * 1, dat$timeofyear)
+  use_aru = !is.na(include_aru) && include_aru
+  X_lambda = cbind(outer(tod, tod_levels, "==") * 1, dat$timeofyear, if (use_aru) dat$aru_01 else 0)
   use_road = !is.na(include_road) && include_road
   X_alpha = cbind(1, if (use_road) dat$near_road else 0, dat$biomass)
 
