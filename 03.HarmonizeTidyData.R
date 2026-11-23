@@ -36,12 +36,12 @@ dat_assess_dir <- "G:/Shared drives/BAM_AvianData/Data Sharing/Dataset Assessmen
 #3. Choose whether to run a small test----
 #A test uses the WildTrax test database and a reproducible random sample of
 #complete eBird checklists. Test outputs are written to separate DuckDB files.
-test.run <- TRUE
+test.run <- FALSE
 test.n.ebird.checklists <- 1000
 test.seed <- 123
 
 #4. Set the WildTrax version ----
-v.wt <- "2026-08-26"
+v.wt <- "2026-11-20"
 
 #5. Set the eBird version ----
 v.ebd <- "Jun-2026"
