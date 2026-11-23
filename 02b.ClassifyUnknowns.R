@@ -138,8 +138,7 @@ candidate.species <- function(
           species_family %in%
             c(
               "Parulidae",
-              "Passerellidae",
-              "Emberizidae"
+              "Passerellidae"
             )
         ) |>
         pull(species_code)
@@ -209,7 +208,190 @@ candidate.species <- function(
   if (annotation.code == "UPEE") {
     return(
       spp |>
-        dplyr::filter(scientific_genus == "Calidris") |>
+        # species that could (liberally) be considered "peeps"
+        dplyr::filter(species_code %in% c("LESA", "SESA", "WESA", "WRSA", "BASA", "LIST", "BBIS", "SAND", "SBSA", "RNST", "TEST", "LTST", "DUNL", "ROSA", "PUSA", "PESA", "SPTS", "4587", "4588")) |>
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNBT") {
+    return(
+      spp %>%
+        dplyr::filter(species_code %in% c("BBWO", "ATTW")) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNOR") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Icterus") %>%
+        pull(species_code)
+    )
+  }  
+  if (annotation.code == "UNAM") {
+    return(
+      spp %>%
+        dplyr::filter(species_code %in% c("AMRO", "SCTA", "WETA", "SUTA", "FCTA", "HETA", "BHGR", "RBGR")) %>%
+        pull(species_code)
+    )
+  }  
+  if (annotation.code == "UNKI") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Tyrannus") %>%
+        pull(species_code)
+    )
+  }  
+  if (annotation.code == "UNYE") {
+    return(
+      spp %>%
+        dplyr::filter(species_code %in% c("GRYE", "LEYE")) |>
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "USET") {
+    return(
+      spp %>%
+        dplyr::filter(species_code %in% c("SPTO", "EATO")) |>
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNPT") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Lagopus") %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UMUR") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Uria") %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UMUR") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Junco") %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNVI") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Vireo") %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNOW") {
+    return(
+      spp %>%
+        dplyr::filter(species_order == "Strigiformes") %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNSW") {
+    return(
+      spp %>%
+        dplyr::filter(species_family == "Hirundinidae") %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UAHA") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus %in% c("Astur", "Accipiter", "Tachyspiza", "Lophospiza")) %>%
+        pull(species_code)
+    )
+  } 
+  if (annotation.code == "UNGR") {
+    return(
+      spp %>%
+        dplyr::filter(species_family == "Phasianidae",
+                      str_detect(
+                        species_common_name,
+                        regex(
+                          "grouse|prairie-chicken|ptarmigan|capercaillie",
+                          ignore_case = TRUE
+                        )
+                      )) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNRV") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Corvus",
+                      str_detect(
+                        species_common_name,
+                        regex(
+                          "raven",
+                          ignore_case = TRUE
+                        )
+                      )) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNCR") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Corvus",
+                      str_detect(
+                        species_common_name,
+                        regex(
+                          "crow",
+                          ignore_case = TRUE
+                        )
+                      )) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UJAE") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus == "Stercorarius",
+                      str_detect(
+                        species_common_name,
+                        regex(
+                          "jaeger",
+                          ignore_case = TRUE
+                        )
+                      )) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNTW") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus %in% c("Pipilo", "Melozone")) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNBL") {
+    return(
+      spp %>%
+        dplyr::filter(scientific_genus %in% c("Agelaius", "Quiscalus", "Euphagus", "Molothrus", "Xanthocephalus")) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UTEA") {
+    return(
+      spp %>%
+        dplyr::filter(species_family == "Anatidae",
+                      str_detect(
+                        species_common_name,
+                        regex(
+                          "teal",
+                          ignore_case = TRUE
+                        )
+                      )) %>%
+        pull(species_code)
+    )
+  }
+  if (annotation.code == "UNSS") {
+    return(
+      spp %>%
+        dplyr::filter(species_code %in% c("NESP", "SALS")) %>%
         pull(species_code)
     )
   }
@@ -259,7 +441,7 @@ candidate.species <- function(
       spp |>
         dplyr::filter(
           species_family == "Anatidae",
-          !scientific_genus %in% c("Aix", "Anas", "Mareca", "Spatula"),
+          !scientific_genus %in% c("Aix", "Anas", "Mareca", "Spatula", "Dendrocygna", "Cairina"),
           !str_detect(
             species_common_name,
             regex(
@@ -308,7 +490,7 @@ candidate.species <- function(
           str_detect(
             species_common_name,
             regex(
-              "tern",
+              "\\btern\\b",
               ignore_case = TRUE
             )
           )
@@ -368,7 +550,11 @@ unknown.categories <- spp.wt |>
     normalized_unknown_code = ifelse(
       species_code == "UNQK",
       "UNDU",
-      species_code
+      ifelse(
+        species_code == "UNAC",
+        "UAHA",
+        species_code
+      )
     ),
     unknown_common_name = species_common_name,
     unknown_order = species_order,
