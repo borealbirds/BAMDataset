@@ -41,7 +41,7 @@ test.n.ebird.checklists <- 1000
 test.seed <- 123
 
 #4. Set the WildTrax version ----
-v.wt <- "2026-11-20"
+v.wt <- "2026-11-21"
 
 #5. Set the eBird version ----
 v.ebd <- "Jun-2026"
@@ -714,6 +714,100 @@ ebd.tidy <- ebd.unique %>%
 
 #rm(ebd.unique, ebd.raw)
 
+# Nightjar surveys ----
+
+##1. Tidy ----
+
+nightjar_raw = read_csv("G:/Shared drives/BAM_AvianData/Harmonization/Others-dataHarmonization/toBAMDataset/CanadianNightjarSurvey.csv") 
+
+nightjar_filtered = nightjar_raw %>%
+  # remove NA coordinates and times
+  dplyr::filter(is.finite(latitude), 
+                is.finite(longitude), 
+                !is.na(survey_datetime), 
+                has_precise_coordinates,
+                # keep only surveys that recorded all individual nightjars from all species
+                all_individuals_reported == "Yes",
+                all_species_reported == "Yes")
+
+nightjar_for_larc_raw = nightjar_filtered %>%
+  # final selection of columns to match pc_qpad_ready
+  mutate(organization = "CNS",
+         project = "Canadian Nightjar Surveys",
+         project_id = 999999,
+         location = site_id,
+         location_id = survey_area_id,
+         location_buffer_m = NA,
+         survey_id = str_replace_all(sampling_event_id, "NIGHTJAR-", "CNS_"),
+         date_time = survey_datetime,
+         survey_url = NA,
+         observer = NA,
+         survey_distance_method = distance_method,
+         survey_duration_method = duration_method,
+         detection_distance = distance_band,
+         detection_time = duration_interval,
+         species_code = species,
+         species_common_name = original_common_name,
+         species_scientific_name = scientific_name,
+         abundance = abundance,
+         detection_heard = ifelse(isHeard == "DNC", NA, isHeard == "Yes"),
+         detection_seen = ifelse(isSeen == "DNC", NA, isSeen == "Yes"),
+         detection_comments = comments,
+         survey_date = survey_datetime,
+         flag_err_date = FALSE,
+         Retenu_Visite = "oui",
+         Inventaire = NA,
+         flag_manual = FALSE,
+         flag_err_loc = FALSE,
+         longitude,
+         latitude,
+         .keep = "none") %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+
+nightjar_tidy = nightjar_for_larc_raw %>%
+  group_by(
+    location_id,
+    longitude,
+    latitude,
+    survey_id,
+    species_code
+  ) %>%
+  mutate(total_count = sum(abundance)) %>%
+  ungroup %>%
+  mutate(
+    data_source = "CNS",
+    sensor = "CNS",
+    method = "PC",
+    duration = as.integer(str_extract(
+      survey_duration_method,
+      "(?<=-)[0-9]+(?=min?)"
+    )) *
+      60,
+    distance = ifelse(
+      str_sub(survey_distance_method, -3, -1) %in%
+        c("INF", "ARU") |
+        survey_distance_method == "UNKNOWN",
+      Inf,
+      as.integer(str_extract(survey_distance_method, "(?<=-)[0-9]+(?=m?)"))
+    ),
+    max_noise_type = NA_character_,
+    max_noise_volume = NA_character_,
+    count = as.integer(abundance),
+    status = TRUE
+  ) %>%
+  mutate(
+    # these two are only for ARUs
+    flag_noise = FALSE,
+    flag_task_wt = FALSE,
+    count_ai_reclassified = 0L
+  ) |>
+  dplyr::select(all_of(colnames(aru.tidy)))
+
+# final things to remove for LARC fits
+nightjar_for_larc = nightjar_for_larc_raw %>%
+  dplyr::filter(species != "NONE",
+                duration_interval != "UNKNOWN" | distance_band != "UNKNOWN") %>%
+
 #PRISM DATA WRANGLING ----
 
 #1. Tidy PRISM data ----
@@ -1191,7 +1285,7 @@ aru_sf <- st_as_sf(
 ) %>%
   mutate(longitude = st_coordinates(.)[, 1], latitude = st_coordinates(.)[, 2])
 pc_sf <- st_as_sf(
-  pc_qpad_ready,
+  rbind(pc_qpad_ready, nightjars_for_larc),
   coords = c("longitude", "latitude"),
   crs = UTM_CRS
 ) %>%
