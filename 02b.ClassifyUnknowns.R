@@ -32,13 +32,13 @@ root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 test.run <- FALSE
 
 #4. Set the WildTrax version----
-v.wt <- "2026-11-20"
+v.wt <- "2026-11-21"
 
 #5. Set classifier decision values----
 classifier.version <- "Hawkears v1.0.8"
 time.buffer.seconds <- 1
-minimum.score <- 0.7
-minimum.score.difference <- 0.2
+minimum.score <- 0.9
+minimum.score.difference <- 0.4
 
 #6. Login to WildTrax----
 source("WTlogin.R")
@@ -183,7 +183,8 @@ candidate.species <- function(
               "Ardeidae",
               "Threskiornithidae",
               "Threskiornithinae",
-              "Ciconiidae"
+              "Ciconiidae",
+              "Phalacrocoracidae"
             )
         ) |>
         pull(species_code)
@@ -205,11 +206,17 @@ candidate.species <- function(
         pull(species_code)
     )
   }
-  if (annotation.code == "UPEE") {
+  if (annotation.code == "UEMB") {
     return(
       spp |>
-        # species that could (liberally) be considered "peeps"
-        dplyr::filter(species_code %in% c("LESA", "SESA", "WESA", "WRSA", "BASA", "LIST", "BBIS", "SAND", "SBSA", "RNST", "TEST", "LTST", "DUNL", "ROSA", "PUSA", "PESA", "SPTS", "4587", "4588")) |>
+        dplyr::filter(
+          species_family %in%
+            c(
+              "Emberizidae",
+              "Passerellidae",
+              "Calcariidae"
+            )
+        ) |>
         pull(species_code)
     )
   }
@@ -269,7 +276,7 @@ candidate.species <- function(
         pull(species_code)
     )
   }
-  if (annotation.code == "UMUR") {
+  if (annotation.code == "UNJU") {
     return(
       spp %>%
         dplyr::filter(scientific_genus == "Junco") %>%
@@ -370,7 +377,7 @@ candidate.species <- function(
   if (annotation.code == "UNBL") {
     return(
       spp %>%
-        dplyr::filter(scientific_genus %in% c("Agelaius", "Quiscalus", "Euphagus", "Molothrus", "Xanthocephalus")) %>%
+        dplyr::filter(scientific_genus %in% c("Dolichonyx", "Agelaius", "Quiscalus", "Euphagus", "Molothrus", "Xanthocephalus")) %>%
         pull(species_code)
     )
   }
@@ -563,6 +570,9 @@ unknown.categories <- spp.wt |>
     use_for_reclassification = !species_code %in%
       c(
         "UNBI",
+        "UPEE",
+        "UNTR",
+        "UNPA",
         "178",
         "183"
       ),
