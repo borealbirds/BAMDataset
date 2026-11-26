@@ -239,7 +239,7 @@ offset_alias = paste0("f", seq_along(offset_files))
 offset_select = c(paste0(offset_alias, ".offset_mean AS ", dbQuoteIdentifier(ANSI(), paste0("offset_mean_", offset_species)), ",\n       ",
                          offset_alias, ".offset_sd AS ", dbQuoteIdentifier(ANSI(), paste0("offset_sd_", offset_species))),
                   "f1.survey_id",
-                  paste0("coalesce(", paste(c("true", paste0(offset_alias[-1], ".survey_id = f1.survey_id")), collapse = " AND "), ", false) AS ids_match"))
+                  paste0("coalesce(", paste(c("true", paste0(offset_alias[-1], ".survey_id = f1.survey_id", recycle0 = TRUE)), collapse = " AND "), ", false) AS ids_match"))
 offset_from = paste0("read_parquet(", dbQuoteString(ANSI(), normalizePath(offset_files, winslash = "/")), ") ", offset_alias,
                      collapse = "\nPOSITIONAL JOIN ")
 

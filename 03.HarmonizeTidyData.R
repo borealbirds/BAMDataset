@@ -41,7 +41,7 @@ test.n.ebird.checklists <- 1000
 test.seed <- 123
 
 #4. Set the WildTrax version ----
-v.wt <- "2026-11-21"
+v.wt <- "2026-11-24"
 
 #5. Set the eBird version ----
 v.ebd <- "Jun-2026"
