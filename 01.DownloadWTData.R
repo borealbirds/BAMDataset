@@ -464,7 +464,17 @@ ddbs_write_dataset(aru.sf, db.conn.path, layer = "aru", overwrite = TRUE)
 
 # re-load connection to be able to add more data
 db.conn <- dbConnect(duckdb(db.conn.path))
+
+#DuckDB v2.0.1 can write boolean columns with Roaring compression that it
+#cannot read back ("Corrupted Roaring segment"). This happened to
+#aru_ai.is_species_allowed_in_project in the 2026-11-24 snapshot. The setting
+#applies only to this connection, so it must be set before any table is written.
+dbExecute(db.conn, "SET disabled_compression_methods = 'roaring'")
 dbExecute(db.conn, "LOAD spatial") # have to do this for whatever reason
+
+#ddbs_write_dataset() writes aru through its own connection, where the setting
+#above does not apply. Rewriting the table here stores it without Roaring.
+dbExecute(db.conn, "CREATE OR REPLACE TABLE aru AS SELECT * FROM aru")
 
 # write the other reports and metadata
 ddbs_write_table(db.conn, pc.sf, name = "pc", overwrite = TRUE)
@@ -477,6 +487,43 @@ dbExecute(
 )
 dbWriteTable(db.conn, name = "project_inventory", proj, overwrite = TRUE)
 dbWriteTable(db.conn, name = "error_log", error.log, overwrite = TRUE)
+
+#Read back every boolean column from disk so a snapshot that cannot be read
+#fails here rather than in a later script.
+dbExecute(db.conn, "CHECKPOINT")
+bool.cols <- dbGetQuery(
+  db.conn,
+  "
+  SELECT table_name, column_name
+  FROM information_schema.columns
+  WHERE data_type = 'BOOLEAN'
+    AND table_schema = 'main'
+  "
+)
+for (i in seq_len(nrow(bool.cols))) {
+  tryCatch(
+    dbGetQuery(
+      db.conn,
+      sprintf(
+        'SELECT sum("%s"::INTEGER) FROM "%s"',
+        bool.cols$column_name[i],
+        bool.cols$table_name[i]
+      )
+    ),
+    error = function(e) {
+      stop(
+        "Boolean column ",
+        bool.cols$table_name[i],
+        ".",
+        bool.cols$column_name[i],
+        " cannot be read back from ",
+        db.conn.path,
+        ": ",
+        conditionMessage(e)
+      )
+    }
+  )
+}
 
 message("WildTrax snapshot written to: ", db.conn.path)
 message("Test run: ", test.run)

@@ -32,7 +32,7 @@ root <- "G:/Shared drives/BAM_AvianData/BAMDataset"
 test.run <- FALSE
 
 #4. Set the WildTrax version----
-v.wt <- "2026-11-21"
+v.wt <- "2026-11-24"
 
 #5. Set classifier decision values----
 classifier.version <- "Hawkears v1.0.8"
@@ -768,6 +768,29 @@ dbExecute(
   "
 )
 
+#Classifier detections for the chosen version are read once from raw.aru_ai.
+#Only recordings containing an unknown tag are kept, which is all that steps 4
+#and 5 use.
+dbExecute(
+  db.conn,
+  paste0(
+    "
+    CREATE OR REPLACE TEMP TABLE classifier_detections_temp AS
+    SELECT
+      recording_id,
+      detection_time,
+      species_code,
+      confidence
+    FROM raw.aru_ai
+    WHERE version = ",
+    sql.string(classifier.version),
+    "
+      AND is_species_allowed_in_project = TRUE
+      AND recording_id IN (SELECT recording_id FROM unknown_annotations)
+    "
+  )
+)
+
 #4. Find and score eligible classifier species within the tag interval----
 #One row is retained per candidate species and human annotation. The highest
 #confidence is used if the classifier detected that species more than once.
@@ -788,7 +811,7 @@ dbExecute(
       MAX(ai.confidence) AS classifier_score,
       COUNT(*) AS number_classifier_detections
     FROM unknown_annotations u
-    INNER JOIN raw.aru_ai ai
+    INNER JOIN classifier_detections_temp ai
       ON u.recording_id = ai.recording_id
       AND ai.detection_time >= u.tag_start - ",
     time.buffer.seconds,
@@ -799,10 +822,6 @@ dbExecute(
     INNER JOIN candidate_species_lookup_temp l
       ON u.annotation_species_code = l.annotation_species_code
       AND ai.species_code = l.candidate_species_code
-    WHERE ai.version = ",
-    sql.string(classifier.version),
-    "
-      AND ai.is_species_allowed_in_project = TRUE
     GROUP BY ALL
     "
   )
@@ -846,11 +865,7 @@ dbExecute(
     ),
     classifier_recordings AS (
       SELECT DISTINCT recording_id
-      FROM raw.aru_ai
-      WHERE version = ",
-    sql.string(classifier.version),
-    "
-        AND is_species_allowed_in_project = TRUE
+      FROM classifier_detections_temp
     )
     SELECT
       u.*,
