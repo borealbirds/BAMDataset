@@ -260,6 +260,11 @@ MIN_Q999_OBSERVATIONS <- 1000
 
 timeofday_cov <- cov_tod_bin("timeofday")
 
+aru_proj = wt_get_projects("ARU") %>%
+  dplyr::select(project_id, project)
+
+single_species_regex = "^(?i)(single *species|subset)"
+
 aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   # add lat and lon as columns so they're not just in geometries
   mutate(
@@ -279,11 +284,13 @@ aru_qpad_ready <- ddbs_read_table(db_conn, "aru") %>%
   dplyr::filter(
     !(species_code %in% c("NONE")),
     !is.na(species_code),
-    !is.na(task_duration),
-    # Records explicitly labelled with no survey method are not valid ARU surveys.
-    is.na(task_method) |
-      str_to_upper(str_squish(task_method)) != "NONE"
-  ) %>%
+    !is.na(task_duration)) %>%
+  # Add project names - important for determining which ones we keep
+  left_join(aru_proj, by = join_by(project_id == project_id)) %>%
+  # if a project name starts with "single species" or "subset", we keep it, even if method is None
+  mutate(task_method = ifelse(str_detect(project, single_species_regex), paste0(task_method, "_subset"), task_method)) %>%
+  # Anything else that has task_method == "None" gets removed.
+  dplyr::filter(is.na(task_method) | str_to_upper(str_squish(task_method)) != "NONE") %>%
   # estimate counts in the event of "too many to track" detections
   wt_replace_tmtt() |>
   # remove any non-numeric values for abundance
