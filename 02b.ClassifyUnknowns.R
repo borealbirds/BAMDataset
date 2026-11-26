@@ -571,6 +571,12 @@ unknown.categories <- spp.wt |>
       c(
         "UNBI",
         "UPEE",
+        # Unidentified grouse - seems to be a little bit overconfident in identifying grouse based on clucks and wing noises
+        "UNGR",
+        # Unidentified gull - definitely misidentifies gulls sometimes, e.g., GWGU reports in Ontario
+        "UNGU",
+        # Unidentified sapsucker - HawkEars currently does not seem capable of correctly identifying YBSA versus RNSA
+        "UNSA",
         "UNTR",
         "UNPA",
         "178",
@@ -757,7 +763,8 @@ dbExecute(
     a.detection_time AS tag_start,
     COALESCE(a.tag_duration, 0) AS tag_duration,
     a.detection_time + COALESCE(a.tag_duration, 0) AS tag_end,
-    a.abundance
+    a.abundance,
+    a.rms_peak_dbfs
   FROM raw.aru a
   INNER JOIN unknown_categories_temp c
     ON a.species_code = c.annotation_species_code
@@ -806,6 +813,7 @@ dbExecute(
       u.tag_id,
       u.annotation_species_code,
       u.normalized_unknown_code,
+      u.rms_peak_dbfs,
       l.candidate_species_code,
       l.candidate_common_name,
       MAX(ai.confidence) AS classifier_score,
